@@ -4,7 +4,7 @@
     "description": "Nervos CKB peersyst SDK for wallet",
     "main": "index.js",
     "scripts": {
-        "build": "rimraf dist",
+        "build": "tsc -p .",
         "start": "ts-node src/index.ts",
         "lint": "eslint . --ext .ts,.json",
         "test": "jest --passWithNoTests --detectOpenHandles",
