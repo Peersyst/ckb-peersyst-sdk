@@ -5,20 +5,23 @@ import { TransactionService, Transaction } from "./transaction.service";
 export class WalletService {
     private readonly connection: ConnectionService;
     private readonly transactionService: TransactionService;
-    private readonly privateKey: ExtendedPrivateKey;
     private readonly accountPublicKey: AccountExtendedPublicKey;
+    private readonly addressType = AddressType.Receiving;
     private addressMap = new Map<number, string>();
 
-    constructor(connectionService: ConnectionService, private readonly mnemo?: string) {
+    constructor(connectionService: ConnectionService, mnemo?: string) {
         this.connection = connectionService;
         this.transactionService = new TransactionService(this.connection);
 
-        if (!this.mnemo) {
-            this.mnemo = mnemonic.generateMnemonic();
+        if (!mnemo) {
+            mnemo = mnemonic.generateMnemonic();
         }
-        const seed = mnemonic.mnemonicToSeedSync(this.mnemo);
-        this.privateKey = ExtendedPrivateKey.fromSeed(seed);
-        this.accountPublicKey = this.privateKey.toAccountExtendedPublicKey();
+        this.accountPublicKey = WalletService.getPrivateKeyFromMnemonic(mnemo).toAccountExtendedPublicKey();
+    }
+
+    static getPrivateKeyFromMnemonic(mnemo: string): ExtendedPrivateKey {
+        const seed = mnemonic.mnemonicToSeedSync(mnemo);
+        return ExtendedPrivateKey.fromSeed(seed);
     }
 
     getAddress(accountId = 0): string {
@@ -27,7 +30,7 @@ export class WalletService {
             const lockScript = {
                 code_hash: template.CODE_HASH,
                 hash_type: template.HASH_TYPE,
-                args: this.accountPublicKey.publicKeyInfo(AddressType.Receiving, accountId).blake160,
+                args: this.accountPublicKey.publicKeyInfo(this.addressType, accountId).blake160,
             };
 
             const address = this.connection.getAddressFromLock(lockScript);
@@ -37,15 +40,15 @@ export class WalletService {
         return this.addressMap.get(accountId);
     }
 
-    async getBalance(accountId = 0): Promise<number> {
+    async getBalance(accountId = 0): Promise<bigint> {
         const address = this.getAddress(accountId);
         const collector = this.connection.getIndexer().collector({
             lock: this.connection.getLockFromAddress(address),
         });
 
-        let balance = 0;
+        let balance = BigInt(0);
         for await (const cell of collector.collect()) {
-            balance += parseInt(cell.cell_output.capacity, 16);
+            balance += BigInt(cell.cell_output.capacity);
         }
 
         return balance;
@@ -55,5 +58,17 @@ export class WalletService {
         const address = this.getAddress(accountId);
 
         return this.transactionService.getTransactions(address);
+    }
+
+    async sendTransaction(amount: number, mnemo: string, to: string, accountId = 0): Promise<string> {
+        if (amount < 6100000000) {
+            throw new Error("Minimum transfer (cell) value is 61 CKB");
+        }
+
+        const from = this.getAddress(accountId);
+        const extPrivateKey = WalletService.getPrivateKeyFromMnemonic(mnemo);
+        const privateKey = extPrivateKey.privateKeyInfo(this.addressType, 0).privateKey;
+
+        return this.transactionService.transfer(from, to, BigInt(amount), privateKey);
     }
 }

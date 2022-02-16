@@ -21,6 +21,7 @@ export interface Transaction {
 export class TransactionService {
     private readonly connection: ConnectionService;
     private readonly TransactionCollector: any;
+    private readonly transactionMap = new Map<string, Transaction>();
 
     constructor(connectionService: ConnectionService) {
         this.connection = connectionService;
@@ -38,33 +39,40 @@ export class TransactionService {
         const transactions: Transaction[] = [];
         let cell: TransactionWithStatus;
         for await (cell of transactionCollector.collect()) {
-            const block = await this.connection.getBlockFromHash(cell.tx_status.block_hash);
+            if (!this.transactionMap.has(cell.transaction.hash)) {
+                const block = await this.connection.getBlockFromHash(cell.tx_status.block_hash);
 
-            const inputs = [];
-            for (let i = 0; i < cell.transaction.inputs.length; i += 1) {
-                const input = cell.transaction.inputs[i];
-                const transaction = await this.connection.getTransactionFromHash(input.previous_output.tx_hash);
-                const output = transaction.transaction.outputs[parseInt(input.previous_output.index, 16)];
-                inputs.push({
+                const inputs = [];
+                for (let i = 0; i < cell.transaction.inputs.length; i += 1) {
+                    const input = cell.transaction.inputs[i];
+                    const transaction = await this.connection.getTransactionFromHash(input.previous_output.tx_hash);
+                    const output = transaction.transaction.outputs[parseInt(input.previous_output.index, 16)];
+                    inputs.push({
+                        quantity: parseInt(output.capacity, 16) / 100000000,
+                        address: this.connection.getAddressFromLock(output.lock),
+                    });
+                }
+
+                const outputs = cell.transaction.outputs.map((output) => ({
                     quantity: parseInt(output.capacity, 16) / 100000000,
                     address: this.connection.getAddressFromLock(output.lock),
+                }));
+
+                this.transactionMap.set(cell.transaction.hash, {
+                    status: cell.tx_status.status,
+                    transactionHash: cell.transaction.hash,
+                    inputs,
+                    outputs,
+                    blockHash: cell.tx_status.block_hash,
+                    blockNumber: parseInt(block.header.number, 16),
+                    timestamp: new Date(parseInt(block.header.timestamp, 16)),
                 });
             }
 
-            const outputs = cell.transaction.outputs.map((output) => ({
-                quantity: parseInt(output.capacity, 16) / 100000000,
-                address: this.connection.getAddressFromLock(output.lock),
-            }));
-
-            transactions.push({
-                status: cell.tx_status.status,
-                transactionHash: cell.transaction.hash,
-                inputs,
-                outputs,
-                blockHash: cell.tx_status.block_hash,
-                blockNumber: parseInt(block.header.number, 16),
-                timestamp: new Date(parseInt(block.header.timestamp, 16)),
-            });
+            const transaction = this.transactionMap.get(cell.transaction.hash);
+            if (!transactions.includes(transaction)) {
+                transactions.push(transaction);
+            }
         }
 
         return transactions;
@@ -75,9 +83,7 @@ export class TransactionService {
         const fromScript = this.connection.getLockFromAddress(from);
         const toScript = this.connection.getLockFromAddress(to);
 
-        // additional 0.001 ckb for tx fee
-        // the tx fee could calculated by tx size
-        // this is just a simple example
+        // Additional 0.001 ckb for tx fee, could calculated by tx size
         const neededCapacity = amount + BigInt(100000);
         let collectedSum = BigInt(0);
         const collected: Cell[] = [];
@@ -165,7 +171,6 @@ export class TransactionService {
         const Sig = hd.key.signRecoverable(message, privateKey);
         const tx = helpers.sealTransaction(txSkeleton, [Sig]);
         const hash = await this.connection.getRPC().send_transaction(tx, "passthrough");
-        console.log("The transaction hash is", hash);
 
         return hash;
     }
