@@ -28,6 +28,7 @@ export class ConnectionService {
         this.rpc = new RPC(this.ckbUrl);
         this.indexer = new Indexer(this.indexerUrl, this.ckbUrl);
         this.config = env === Environments.Mainnet ? LINA : AGGRON4;
+        config.initializeConfig(this.config);
     }
 
     async getBlockchainInfo(): Promise<ChainInfo> {
