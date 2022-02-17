@@ -1,6 +1,8 @@
-import { helpers, toolkit, WitnessArgs, core, commons, hd } from "@ckb-lumos/lumos";
-import { TransactionWithStatus, Cell, values } from "@ckb-lumos/base";
+import { toolkit, WitnessArgs, core, commons, hd } from "@ckb-lumos/lumos";
+import { sealTransaction, TransactionSkeleton, TransactionSkeletonType, scriptToAddress } from "@ckb-lumos/helpers";
+import { TransactionWithStatus, Cell, values, CellCollector } from "@ckb-lumos/base";
 import { TransactionCollector as TxCollector } from "@ckb-lumos/ckb-indexer";
+import { ScriptConfig } from "@ckb-lumos/config-manager";
 import { ConnectionService } from "./connection.service";
 
 export interface DataRow {
@@ -22,6 +24,9 @@ export class TransactionService {
     private readonly connection: ConnectionService;
     private readonly TransactionCollector: any;
     private readonly transactionMap = new Map<string, Transaction>();
+    private readonly transferCellSize = BigInt(61 * 10 ** 8);
+    private readonly usdtCellSize = BigInt(142 * 10 ** 8);
+    private readonly defaultFee = BigInt(100000);
 
     constructor(connectionService: ConnectionService) {
         this.connection = connectionService;
@@ -78,19 +83,68 @@ export class TransactionService {
         return transactions;
     }
 
+    async issueTokens(address: string, amount: number, privateKey: string): Promise<string> {
+        const addressScript = this.connection.getLockFromAddress(address);
+        const collector = this.connection.getIndexer().collector({ lock: addressScript, type: "empty" });
+        const deps = [this.connection.getConfig().SCRIPTS.SECP256K1_BLAKE160, this.connection.getConfig().SCRIPTS.SUDT];
+
+        const txSkeleton = await this.generateRawTransaction(address, address, this.usdtCellSize, this.defaultFee, collector, deps);
+        const firstOutputCell = txSkeleton.outputs.get(0);
+        firstOutputCell.cell_output.type = {
+            code_hash: this.connection.getConfig().SCRIPTS.SUDT.CODE_HASH,
+            hash_type: this.connection.getConfig().SCRIPTS.SUDT.HASH_TYPE,
+            // args: addressScript.args,
+            args: scriptToAddress(addressScript),
+        };
+        firstOutputCell.data = `0x${Buffer.from(amount.toString(16).padStart(32, "0"), "hex").reverse().toString("hex")}`;
+        txSkeleton.outputs.set(0, firstOutputCell);
+
+        return this.signTransaction(txSkeleton, privateKey);
+    }
+
     async transfer(from: string, to: string, amount: bigint, privateKey: string): Promise<string> {
-        let txSkeleton = helpers.TransactionSkeleton({});
+        if (amount < this.transferCellSize) {
+            throw new Error("Minimum transfer (cell) value is 61 CKB");
+        }
+
+        const fromScript = this.connection.getLockFromAddress(from);
+        const collector = this.connection.getIndexer().collector({ lock: fromScript, type: "empty" });
+        const deps = [this.connection.getConfig().SCRIPTS.SECP256K1_BLAKE160];
+
+        const txSkeleton = await this.generateRawTransaction(from, to, amount, this.defaultFee, collector, deps);
+
+        return this.signTransaction(txSkeleton, privateKey);
+    }
+
+    async signTransaction(txSkeleton: TransactionSkeletonType, privateKey: string): Promise<string> {
+        const message = txSkeleton.get("signingEntries").get(0)?.message;
+        const Sig = hd.key.signRecoverable(message, privateKey);
+        const tx = sealTransaction(txSkeleton, [Sig]);
+        const hash = await this.connection.getRPC().send_transaction(tx, "passthrough");
+
+        return hash;
+    }
+
+    async generateRawTransaction(
+        from: string,
+        to: string,
+        capacity: bigint,
+        fee: bigint,
+        collector: CellCollector,
+        deps: ScriptConfig[],
+    ): Promise<TransactionSkeletonType> {
+        let txSkeleton = TransactionSkeleton({});
         const fromScript = this.connection.getLockFromAddress(from);
         const toScript = this.connection.getLockFromAddress(to);
 
         // Additional 0.001 ckb for tx fee, could calculated by tx size
-        const neededCapacity = amount + BigInt(100000);
+        const neededCapacity = capacity + fee;
+        const neededCells: Cell[] = [];
         let collectedSum = BigInt(0);
-        const collected: Cell[] = [];
-        const collector = this.connection.getIndexer().collector({ lock: fromScript, type: "empty" });
+
         for await (const cell of collector.collect()) {
             collectedSum += BigInt(cell.cell_output.capacity);
-            collected.push(cell);
+            neededCells.push(cell);
             if (collectedSum >= neededCapacity) break;
         }
 
@@ -100,7 +154,7 @@ export class TransactionService {
 
         const transferOutput: Cell = {
             cell_output: {
-                capacity: "0x" + amount.toString(16),
+                capacity: "0x" + capacity.toString(16),
                 lock: toScript,
             },
             data: "0x",
@@ -114,16 +168,15 @@ export class TransactionService {
             data: "0x",
         };
 
-        txSkeleton = txSkeleton.update("inputs", (inputs) => inputs.push(...collected));
+        txSkeleton = txSkeleton.update("inputs", (inputs) => inputs.push(...neededCells));
         txSkeleton = txSkeleton.update("outputs", (outputs) => outputs.push(transferOutput, changeOutput));
         txSkeleton = txSkeleton.update("cellDeps", (cellDeps) =>
-            cellDeps.push({
-                out_point: {
-                    tx_hash: this.connection.getConfig().SCRIPTS.SECP256K1_BLAKE160.TX_HASH,
-                    index: this.connection.getConfig().SCRIPTS.SECP256K1_BLAKE160.INDEX,
-                },
-                dep_type: this.connection.getConfig().SCRIPTS.SECP256K1_BLAKE160.DEP_TYPE,
-            }),
+            cellDeps.push(
+                ...deps.map((dep) => ({
+                    out_point: { tx_hash: dep.TX_HASH, index: dep.INDEX },
+                    dep_type: dep.DEP_TYPE,
+                })),
+            ),
         );
 
         const firstIndex = txSkeleton
@@ -167,11 +220,7 @@ export class TransactionService {
         }
 
         txSkeleton = commons.common.prepareSigningEntries(txSkeleton);
-        const message = txSkeleton.get("signingEntries").get(0)?.message;
-        const Sig = hd.key.signRecoverable(message, privateKey);
-        const tx = helpers.sealTransaction(txSkeleton, [Sig]);
-        const hash = await this.connection.getRPC().send_transaction(tx, "passthrough");
 
-        return hash;
+        return txSkeleton;
     }
 }

@@ -60,15 +60,23 @@ export class WalletService {
         return this.transactionService.getTransactions(address);
     }
 
-    async sendTransaction(amount: number, mnemo: string, to: string, accountId = 0): Promise<string> {
-        if (amount < 6100000000) {
-            throw new Error("Minimum transfer (cell) value is 61 CKB");
-        }
+    async sendTransaction(amount: bigint, mnemo: string, to: string, accountId = 0): Promise<string> {
+        const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
 
-        const from = this.getAddress(accountId);
+        return this.transactionService.transfer(address, to, BigInt(amount), privateKey);
+    }
+
+    async issueTokens(amount: number, mnemo: string, accountId = 0): Promise<string> {
+        const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
+
+        return this.transactionService.issueTokens(address, amount, privateKey);
+    }
+
+    getAddressAndPrivateKey(mnemo: string, accountId = 0): { address: string; privateKey: string } {
+        const address = this.getAddress(accountId);
         const extPrivateKey = WalletService.getPrivateKeyFromMnemonic(mnemo);
         const privateKey = extPrivateKey.privateKeyInfo(this.addressType, 0).privateKey;
 
-        return this.transactionService.transfer(from, to, BigInt(amount), privateKey);
+        return { address, privateKey };
     }
 }
