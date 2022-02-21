@@ -2,20 +2,14 @@ import { mnemonic, ExtendedPrivateKey, AccountExtendedPublicKey, AddressType } f
 import { utils } from "@ckb-lumos/base";
 import { ConnectionService } from "./connection.service";
 import { TransactionService, Transaction } from "./transaction.service";
-
-export interface TokenType {
-    args: string;
-    codeHash: string;
-    hashType: string;
-}
-export interface TokenAmount {
-    type: TokenType;
-    amount: number;
-}
+import { TokenService, TokenAmount } from "./token.service";
+import { CKBService } from "./ckb.service";
 
 export class WalletService {
     private readonly connection: ConnectionService;
     private readonly transactionService: TransactionService;
+    private readonly ckbService: CKBService;
+    private readonly tokenService: TokenService;
     private readonly accountPublicKey: AccountExtendedPublicKey;
     private readonly addressType = AddressType.Receiving;
     private addressMap = new Map<number, string>();
@@ -23,6 +17,8 @@ export class WalletService {
     constructor(connectionService: ConnectionService, mnemo?: string) {
         this.connection = connectionService;
         this.transactionService = new TransactionService(this.connection);
+        this.ckbService = new CKBService(this.connection, this.transactionService);
+        this.tokenService = new TokenService(this.connection, this.transactionService);
 
         if (!mnemo) {
             mnemo = mnemonic.generateMnemonic();
@@ -35,6 +31,9 @@ export class WalletService {
         return ExtendedPrivateKey.fromSeed(seed);
     }
 
+    // ----------------------
+    // -- Wallet functions --
+    // ----------------------
     getAddress(accountId = 0): string {
         if (!this.addressMap.has(accountId)) {
             const template = this.connection.getConfig().SCRIPTS["SECP256K1_BLAKE160"];
@@ -49,6 +48,14 @@ export class WalletService {
         }
 
         return this.addressMap.get(accountId);
+    }
+
+    getAddressAndPrivateKey(mnemo: string, accountId = 0): { address: string; privateKey: string } {
+        const address = this.getAddress(accountId);
+        const extPrivateKey = WalletService.getPrivateKeyFromMnemonic(mnemo);
+        const privateKey = extPrivateKey.privateKeyInfo(this.addressType, accountId).privateKey;
+
+        return { address, privateKey };
     }
 
     async getBalance(accountId = 0): Promise<bigint> {
@@ -96,35 +103,36 @@ export class WalletService {
         return tokens;
     }
 
+    // -----------------------------------
+    // -- Transaction service functions --
+    // -----------------------------------
     async getTransactions(accountId = 0): Promise<Transaction[]> {
         const address = this.getAddress(accountId);
 
         return this.transactionService.getTransactions(address);
     }
 
+    // ---------------------------
+    // -- CKB service functions --
+    // ---------------------------
     async sendTransaction(amount: bigint, mnemo: string, to: string, accountId = 0): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
 
-        return this.transactionService.transfer(address, to, BigInt(amount), privateKey);
+        return this.ckbService.transfer(address, to, BigInt(amount), privateKey);
     }
 
+    // -----------------------------
+    // -- Token service functions --
+    // -----------------------------
     async issueTokens(amount: number, mnemo: string, accountId = 0): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
 
-        return this.transactionService.issueTokens(address, amount, privateKey);
+        return this.tokenService.issue(address, amount, privateKey);
     }
 
     async transferTokens(amount: number, mnemo: string, to: string, token: string, accountId = 0): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
 
-        return this.transactionService.transferTokens(address, to, token, amount, privateKey);
-    }
-
-    getAddressAndPrivateKey(mnemo: string, accountId = 0): { address: string; privateKey: string } {
-        const address = this.getAddress(accountId);
-        const extPrivateKey = WalletService.getPrivateKeyFromMnemonic(mnemo);
-        const privateKey = extPrivateKey.privateKeyInfo(this.addressType, accountId).privateKey;
-
-        return { address, privateKey };
+        return this.tokenService.transfer(address, to, token, amount, privateKey);
     }
 }

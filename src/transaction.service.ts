@@ -1,11 +1,9 @@
-import { toolkit, WitnessArgs, core, commons, hd, utils } from "@ckb-lumos/lumos";
-import { sealTransaction, TransactionSkeleton, TransactionSkeletonType, scriptToAddress } from "@ckb-lumos/helpers";
-import { TransactionWithStatus, Cell, values, CellCollector } from "@ckb-lumos/base";
+import { commons, hd, utils } from "@ckb-lumos/lumos";
+import { sealTransaction, TransactionSkeletonType } from "@ckb-lumos/helpers";
+import { TransactionWithStatus } from "@ckb-lumos/base";
 import { TransactionCollector as TxCollector } from "@ckb-lumos/ckb-indexer";
-import { ScriptConfig } from "@ckb-lumos/config-manager";
-import { secp256k1Blake160, sudt } from "@ckb-lumos/common-scripts";
 import { ConnectionService } from "./connection.service";
-import { TokenType } from "./wallet.service";
+import { TokenType } from "./token.service";
 
 export interface DataRow {
     quantity: number;
@@ -28,9 +26,7 @@ export class TransactionService {
     private readonly connection: ConnectionService;
     private readonly TransactionCollector: any;
     private readonly transactionMap = new Map<string, Transaction>();
-    private readonly transferCellSize = BigInt(61 * 10 ** 8);
-    private readonly defaultFee = BigInt(100000);
-    // private readonly sudtCellSize = BigInt(142 * 10 ** 8);
+    public readonly defaultFee = BigInt(100000);
 
     constructor(connectionService: ConnectionService) {
         this.connection = connectionService;
@@ -62,7 +58,6 @@ export class TransactionService {
                     });
                 }
 
-                // console.log(JSON.stringify(cell.transaction, null, 2));
                 const outputs: DataRow[] = cell.transaction.outputs.map((output) => ({
                     quantity: parseInt(output.capacity, 16) / 100000000,
                     address: this.connection.getAddressFromLock(output.lock),
@@ -96,167 +91,13 @@ export class TransactionService {
         return transactions;
     }
 
-    async issueTokens(address: string, amount: number, privateKey: string): Promise<string> {
-        // Old way
-        // const addressScript = this.connection.getLockFromAddress(address);
-        // const collector = this.connection.getIndexer().collector({ lock: addressScript, type: "empty" });
-        // const deps = [this.connection.getConfig().SCRIPTS.SECP256K1_BLAKE160, this.connection.getConfig().SCRIPTS.SUDT];
-        // const txSkeleton = await this.generateRawTransaction(address, address, this.usdtCellSize, this.defaultFee, collector, deps);
-        // const firstOutputCell = txSkeleton.outputs.get(0);
-        // firstOutputCell.cell_output.type = {
-        //     code_hash: this.connection.getConfig().SCRIPTS.SUDT.CODE_HASH,
-        //     hash_type: this.connection.getConfig().SCRIPTS.SUDT.HASH_TYPE,
-        //     args: utils.computeScriptHash(addressScript),
-        //     // args: scriptToAddress(addressScript),
-        // };
-        // firstOutputCell.data = `0x${Buffer.from(amount.toString(16).padStart(32, "0"), "hex").reverse().toString("hex")}`;
-        // txSkeleton.outputs.set(0, firstOutputCell);
-
-        let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getIndexer() });
-        txSkeleton = await sudt.issueToken(txSkeleton, address, amount, undefined, undefined, { config: this.connection.getConfig() });
-        txSkeleton = await secp256k1Blake160.payFee(txSkeleton, address, this.defaultFee, { config: this.connection.getConfig() });
-        txSkeleton = commons.common.prepareSigningEntries(txSkeleton, { config: this.connection.getConfig() });
-
-        return this.signTransaction(txSkeleton, privateKey);
-    }
-
-    async transferTokens(from: string, to: string, token: string, amount: number, privateKey: string): Promise<string> {
-        let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getIndexer() });
-        txSkeleton = await sudt.transfer(txSkeleton, [from], token, to, amount, undefined, undefined, undefined, {
-            config: this.connection.getConfig(),
-        });
-        txSkeleton = await secp256k1Blake160.payFee(txSkeleton, from, this.defaultFee, { config: this.connection.getConfig() });
-        txSkeleton = commons.common.prepareSigningEntries(txSkeleton, { config: this.connection.getConfig() });
-
-        console.log(JSON.stringify(txSkeleton, null, 2));
-        return "hola";
-        // return this.signTransaction(txSkeleton, privateKey);
-    }
-
-    async transfer(from: string, to: string, amount: bigint, privateKey: string): Promise<string> {
-        if (amount < this.transferCellSize) {
-            throw new Error("Minimum transfer (cell) value is 61 CKB");
-        }
-
-        // Old way
-        // const fromScript = this.connection.getLockFromAddress(from);
-        // const collector = this.connection.getIndexer().collector({ lock: fromScript, type: "empty" });
-        // const deps = [this.connection.getConfig().SCRIPTS.SECP256K1_BLAKE160];
-        // const txSkeleton = await this.generateRawTransaction(from, to, amount, this.defaultFee, collector, deps);
-
-        let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getIndexer() });
-        txSkeleton = await secp256k1Blake160.transfer(txSkeleton, from, to, amount, { config: this.connection.getConfig() });
-        txSkeleton = await secp256k1Blake160.payFee(txSkeleton, from, this.defaultFee, { config: this.connection.getConfig() });
-        txSkeleton = commons.common.prepareSigningEntries(txSkeleton);
-
-        return this.signTransaction(txSkeleton, privateKey);
-    }
-
     async signTransaction(txSkeleton: TransactionSkeletonType, privateKey: string): Promise<string> {
-        const message = txSkeleton.get("signingEntries").get(0)?.message;
+        const txSkeletonWEntries = commons.common.prepareSigningEntries(txSkeleton, this.connection.getConfigAsObject());
+        const message = txSkeletonWEntries.get("signingEntries").get(0)?.message;
         const Sig = hd.key.signRecoverable(message, privateKey);
-        const tx = sealTransaction(txSkeleton, [Sig]);
+        const tx = sealTransaction(txSkeletonWEntries, [Sig]);
         const hash = await this.connection.getRPC().send_transaction(tx, "passthrough");
 
         return hash;
-    }
-
-    async generateRawTransaction(
-        from: string,
-        to: string,
-        capacity: bigint,
-        fee: bigint,
-        collector: CellCollector,
-        deps: ScriptConfig[],
-    ): Promise<TransactionSkeletonType> {
-        let txSkeleton = TransactionSkeleton({});
-        const fromScript = this.connection.getLockFromAddress(from);
-        const toScript = this.connection.getLockFromAddress(to);
-
-        // Additional 0.001 ckb for tx fee, could calculated by tx size
-        const neededCapacity = capacity + fee;
-        const neededCells: Cell[] = [];
-        let collectedSum = BigInt(0);
-
-        for await (const cell of collector.collect()) {
-            collectedSum += BigInt(cell.cell_output.capacity);
-            neededCells.push(cell);
-            if (collectedSum >= neededCapacity) break;
-        }
-
-        if (collectedSum < neededCapacity) {
-            throw new Error("Not enough CKB");
-        }
-
-        const transferOutput: Cell = {
-            cell_output: {
-                capacity: "0x" + capacity.toString(16),
-                lock: toScript,
-            },
-            data: "0x",
-        };
-
-        const changeOutput: Cell = {
-            cell_output: {
-                capacity: "0x" + BigInt(collectedSum - neededCapacity).toString(16),
-                lock: fromScript,
-            },
-            data: "0x",
-        };
-
-        txSkeleton = txSkeleton.update("inputs", (inputs) => inputs.push(...neededCells));
-        txSkeleton = txSkeleton.update("outputs", (outputs) => outputs.push(transferOutput, changeOutput));
-        txSkeleton = txSkeleton.update("cellDeps", (cellDeps) =>
-            cellDeps.push(
-                ...deps.map((dep) => ({
-                    out_point: { tx_hash: dep.TX_HASH, index: dep.INDEX },
-                    dep_type: dep.DEP_TYPE,
-                })),
-            ),
-        );
-
-        const firstIndex = txSkeleton
-            .get("inputs")
-            .findIndex((input) =>
-                new values.ScriptValue(input.cell_output.lock, { validate: false }).equals(
-                    new values.ScriptValue(fromScript, { validate: false }),
-                ),
-            );
-        if (firstIndex !== -1) {
-            while (firstIndex >= txSkeleton.get("witnesses").size) {
-                txSkeleton = txSkeleton.update("witnesses", (witnesses) => witnesses.push("0x"));
-            }
-            let witness: string = txSkeleton.get("witnesses").get(firstIndex);
-            const newWitnessArgs: WitnessArgs = {
-                /* 65-byte zeros in hex */
-                lock: "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-            };
-            if (witness !== "0x") {
-                const witnessArgs = new core.WitnessArgs(new toolkit.Reader(witness));
-                const lock = witnessArgs.getLock();
-                if (lock.hasValue() && new toolkit.Reader(lock.value().raw()).serializeJson() !== newWitnessArgs.lock) {
-                    throw new Error("Lock field in first witness is set aside for signature!");
-                }
-
-                const inputType = witnessArgs.getInputType();
-                if (inputType.hasValue()) {
-                    newWitnessArgs.input_type = new toolkit.Reader(inputType.value().raw()).serializeJson();
-                }
-
-                const outputType = witnessArgs.getOutputType();
-                if (outputType.hasValue()) {
-                    newWitnessArgs.output_type = new toolkit.Reader(outputType.value().raw()).serializeJson();
-                }
-            }
-
-            witness = new toolkit.Reader(
-                core.SerializeWitnessArgs(toolkit.normalizers.NormalizeWitnessArgs(newWitnessArgs)),
-            ).serializeJson();
-            txSkeleton = txSkeleton.update("witnesses", (witnesses) => witnesses.set(firstIndex, witness));
-        }
-
-        txSkeleton = commons.common.prepareSigningEntries(txSkeleton, { config: this.connection.getConfig() });
-
-        return txSkeleton;
     }
 }

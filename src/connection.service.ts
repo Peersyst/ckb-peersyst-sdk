@@ -55,6 +55,10 @@ export class ConnectionService {
         return this.config;
     }
 
+    getConfigAsObject(): helpers.Options {
+        return { config: this.config };
+    }
+
     getRPC(): RPC {
         return this.rpc;
     }
