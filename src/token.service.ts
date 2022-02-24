@@ -1,3 +1,4 @@
+import { Script, utils } from "@ckb-lumos/lumos";
 import { TransactionSkeleton } from "@ckb-lumos/helpers";
 import { sudt, common } from "@ckb-lumos/common-scripts";
 import { ConnectionService } from "./connection.service";
@@ -44,8 +45,45 @@ export class TokenService {
         });
         txSkeleton = await common.payFee(txSkeleton, [from], this.transactionService.defaultFee, null, this.connection.getConfigAsObject());
 
-        // console.log(JSON.stringify(txSkeleton, null, 2));
-        // return "hola";
         return this.transactionService.signTransaction(txSkeleton, privateKey);
+    }
+
+    async getBalance(address: string): Promise<TokenAmount[]> {
+        const collector = this.connection.getIndexer().collector({
+            lock: this.connection.getLockFromAddress(address),
+        });
+
+        const tokenMap = new Map<string, number>();
+        for await (const cell of collector.collect()) {
+            if (this.isTokenScriptType(cell.cell_output.type)) {
+                const key = cell.cell_output.type.args;
+
+                if (!tokenMap.has(key)) {
+                    tokenMap.set(key, Number(utils.readBigUInt128LE(cell.data)));
+                } else {
+                    tokenMap.set(key, Number(utils.readBigUInt128LE(cell.data)) + tokenMap.get(key));
+                }
+            }
+        }
+
+        const tokens: TokenAmount[] = [];
+        const { CODE_HASH: codeHash, HASH_TYPE: hashType } = this.connection.getConfig().SCRIPTS.SUDT;
+        tokenMap.forEach((value, key) =>
+            tokens.push({
+                type: { args: key, codeHash, hashType },
+                amount: value,
+            }),
+        );
+
+        return tokens;
+    }
+
+    private isTokenScriptType(script: Script): boolean {
+        if (!script) {
+            return false;
+        }
+
+        const sudtScript = this.connection.getConfig().SCRIPTS.SUDT;
+        return script.code_hash === sudtScript.CODE_HASH && script.hash_type === sudtScript.HASH_TYPE;
     }
 }

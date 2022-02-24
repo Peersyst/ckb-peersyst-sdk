@@ -1,4 +1,4 @@
-import { Cell } from "@ckb-lumos/lumos";
+import { Cell, Script } from "@ckb-lumos/lumos";
 import { TransactionSkeleton } from "@ckb-lumos/helpers";
 import { dao, common } from "@ckb-lumos/common-scripts";
 import { ConnectionService } from "./connection.service";
@@ -7,6 +7,11 @@ import { TransactionService } from "./transaction.service";
 export interface DAOStatistics {
     maximumWithdraw: bigint;
     daoEarliestSince: bigint;
+}
+
+export interface DAOBalance {
+    daoDeposit: bigint;
+    daoCompensation: bigint;
 }
 
 export enum DAOCellType {
@@ -19,17 +24,31 @@ export class DAOService {
     private readonly connection: ConnectionService;
     private readonly transactionService: TransactionService;
     private readonly daoCellSize = BigInt(102 * 10 ** 8);
+    private readonly daoScriptArgs = "0x";
+    private readonly depositDaoData = "0x0000000000000000";
 
     constructor(connectionService: ConnectionService, transactionService: TransactionService) {
         this.connection = connectionService;
         this.transactionService = transactionService;
     }
 
-    async getCells(address: string, type: DAOCellType = DAOCellType.ALL) {
+    async getCells(address: string, cellType: DAOCellType = DAOCellType.ALL): Promise<Cell[]> {
         const cells = [];
-        const daoDepositedCellCollector = new dao.CellCollector(address, this.connection.getIndexer(), type);
+        const daoConfig = this.connection.getConfig().SCRIPTS.DAO;
+        const daoScript: Script = { code_hash: daoConfig.CODE_HASH, hash_type: daoConfig.HASH_TYPE, args: this.daoScriptArgs };
+        const data = cellType === DAOCellType.DEPOSIT ? this.depositDaoData : "any";
 
-        for await (const inputCell of daoDepositedCellCollector.collect()) {
+        const collector = this.connection.getIndexer().collector({
+            lock: this.connection.getLockFromAddress(address),
+            type: daoScript,
+            data,
+        });
+
+        for await (const inputCell of collector.collect()) {
+            if (cellType === DAOCellType.WITHDRAW && inputCell.data === this.depositDaoData) {
+                continue;
+            }
+
             if (!inputCell.block_hash && inputCell.block_number) {
                 const header = await this.connection.getBlockHeaderFromNumber(inputCell.block_number);
                 cells.push({ ...inputCell, block_hash: header.hash });
@@ -39,6 +58,27 @@ export class DAOService {
         }
 
         return cells;
+    }
+
+    async getBalance(address: string): Promise<DAOBalance> {
+        const cells = await this.getCells(address, DAOCellType.ALL);
+        let daoDeposit = BigInt(0);
+        let daoCompensation = BigInt(0);
+
+        for (let i = 0; i < cells.length; i += 1) {
+            let maxWithdraw = BigInt(0);
+            daoDeposit += BigInt(cells[i].cell_output.capacity);
+
+            if (cells[i].data === this.depositDaoData) {
+                maxWithdraw = await this.getDepositCellMaximumWithdraw(cells[i]);
+            } else {
+                maxWithdraw = await this.getWithdrawCellMaximumWithdraw(cells[i]);
+            }
+
+            daoCompensation += maxWithdraw - BigInt(cells[i].cell_output.capacity);
+        }
+
+        return { daoDeposit, daoCompensation };
     }
 
     async deposit(amount: bigint, from: string, to: string, privateKey: string): Promise<string> {
@@ -84,23 +124,22 @@ export class DAOService {
     async getStatistics(address: string): Promise<DAOStatistics> {
         const statistics: DAOStatistics = { maximumWithdraw: BigInt(0), daoEarliestSince: null };
 
-        const depositCells = await this.getCells(address, DAOCellType.DEPOSIT);
-        for (let i = 0; i < depositCells.length; i += 1) {
-            const maxWithdraw = await this.getDepositCellMaximumWithdraw(depositCells[i]);
-            statistics.maximumWithdraw += maxWithdraw;
-            const earliestSince = await this.getDepositDaoEarliestSince(depositCells[i]);
-            if (!statistics.daoEarliestSince || statistics.daoEarliestSince > earliestSince) {
-                statistics.daoEarliestSince = earliestSince;
-            }
-        }
-
-        const withdrawCells = await this.getCells(address, DAOCellType.WITHDRAW);
-        for (let i = 0; i < withdrawCells.length; i += 1) {
-            const maxWithdraw = await this.getWithdrawCellMaximumWithdraw(withdrawCells[i]);
-            statistics.maximumWithdraw += maxWithdraw;
-            const earliestSince = await this.getWithdrawDaoEarliestSince(withdrawCells[i]);
-            if (!statistics.daoEarliestSince || statistics.daoEarliestSince > earliestSince) {
-                statistics.daoEarliestSince = earliestSince;
+        const cells = await this.getCells(address, DAOCellType.ALL);
+        for (let i = 0; i < cells.length; i += 1) {
+            if (cells[i].data === this.depositDaoData) {
+                const maxWithdraw = await this.getDepositCellMaximumWithdraw(cells[i]);
+                statistics.maximumWithdraw += maxWithdraw;
+                const earliestSince = await this.getDepositDaoEarliestSince(cells[i]);
+                if (!statistics.daoEarliestSince || statistics.daoEarliestSince > earliestSince) {
+                    statistics.daoEarliestSince = earliestSince;
+                }
+            } else {
+                const maxWithdraw = await this.getWithdrawCellMaximumWithdraw(cells[i]);
+                statistics.maximumWithdraw += maxWithdraw;
+                const earliestSince = await this.getWithdrawDaoEarliestSince(cells[i]);
+                if (!statistics.daoEarliestSince || statistics.daoEarliestSince > earliestSince) {
+                    statistics.daoEarliestSince = earliestSince;
+                }
             }
         }
 

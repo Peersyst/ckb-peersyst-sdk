@@ -15,8 +15,9 @@ const mnemonicKeyAcc2 = "private pond zero popular fashion omit february obscure
 
 // Import wallet from mnemonic
 const wallet = new WalletService(connectionService, mnemonicKeyAcc2);
-wallet.getBalance().then((value) => console.log((Number(value) / 10 ** 8).toFixed(8)));
-// wallet.getTokensBalance().then((tokens) => console.log(tokens));
+// wallet.getCKBBalance().then((value) => console.log("getCKBBalance: ", value));
+// wallet.getTokensBalance().then((tokens) => console.log("getTokensBalance: ", tokens));
+wallet.getBalance().then((balance) => console.log("getBalance: ", balance));
 // wallet.getTransactions().then((value) => console.log(value.length, JSON.stringify(value, null, 2)));
 
 // Send 123CKB

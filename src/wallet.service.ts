@@ -1,16 +1,21 @@
 import { mnemonic, ExtendedPrivateKey, AccountExtendedPublicKey, AddressType } from "@ckb-lumos/hd";
-import { utils } from "@ckb-lumos/base";
 import { ConnectionService } from "./connection.service";
 import { TransactionService, Transaction } from "./transaction.service";
 import { TokenService, TokenAmount } from "./token.service";
-import { CKBService } from "./ckb.service";
-import { DAOService, DAOStatistics } from "./dao.service";
+import { CKBBalance, CKBService } from "./ckb.service";
+import { DAOBalance, DAOService, DAOStatistics } from "./dao.service";
 import { Cell } from "@ckb-lumos/lumos";
 
 export enum AddressScriptType {
     SECP256K1_BLAKE160 = "SECP256K1_BLAKE160",
     SUDT = "SUDT",
     DAO = "DAO",
+}
+
+export interface Balance {
+    ckb: CKBBalance;
+    tokens: TokenAmount[];
+    dao: DAOBalance;
 }
 
 export class WalletService {
@@ -74,60 +79,13 @@ export class WalletService {
         return { address, privateKey };
     }
 
-    // Useless
-    getAllAddresses(accountId = 0): any {
-        const ckbAddress = this.getAddress(accountId, AddressScriptType.SECP256K1_BLAKE160);
-        const tokenAddress = this.getAddress(accountId, AddressScriptType.SUDT);
-        const daoAddress = this.getAddress(accountId, AddressScriptType.DAO);
-
-        return { ckbAddress, tokenAddress, daoAddress };
-    }
-
-    async getBalance(accountId = 0): Promise<bigint> {
-        // FILTER BY SCRIPT?? EXPLORER DOES NOT
+    async getBalance(accountId = 0): Promise<Balance> {
         const address = this.getAddress(accountId);
-        const collector = this.connection.getIndexer().collector({
-            lock: this.connection.getLockFromAddress(address),
-        });
+        const ckb = await this.ckbService.getBalance(address);
+        const tokens = await this.tokenService.getBalance(address);
+        const dao = await this.daoService.getBalance(address);
 
-        let balance = BigInt(0);
-        for await (const cell of collector.collect()) {
-            balance += BigInt(cell.cell_output.capacity);
-        }
-
-        return balance;
-    }
-
-    async getTokensBalance(accountId = 0): Promise<TokenAmount[]> {
-        // FILTER BY SCRIPT
-        const address = this.getAddress(accountId);
-        const collector = this.connection.getIndexer().collector({
-            lock: this.connection.getLockFromAddress(address),
-        });
-
-        const tokenMap = new Map<string, number>();
-        for await (const cell of collector.collect()) {
-            if (cell.cell_output.type) {
-                const { args, code_hash, hash_type } = cell.cell_output.type;
-                const key = [args, code_hash, hash_type].join(",");
-
-                if (!tokenMap.has(key)) {
-                    tokenMap.set(key, Number(utils.readBigUInt128LE(cell.data)));
-                } else {
-                    tokenMap.set(key, Number(utils.readBigUInt128LE(cell.data)) + tokenMap.get(key));
-                }
-            }
-        }
-
-        const tokens: TokenAmount[] = [];
-        tokenMap.forEach((value, key) =>
-            tokens.push({
-                type: { args: key.split(",")[0], codeHash: key.split(",")[1], hashType: key.split(",")[2] },
-                amount: value,
-            }),
-        );
-
-        return tokens;
+        return { ckb, tokens, dao };
     }
 
     // -----------------------------------
@@ -148,6 +106,11 @@ export class WalletService {
         return this.ckbService.transfer(address, to, BigInt(amount), privateKey);
     }
 
+    async getCKBBalance(accountId = 0): Promise<CKBBalance> {
+        const address = this.getAddress(accountId);
+        return this.ckbService.getBalance(address);
+    }
+
     // -----------------------------
     // -- Token service functions --
     // -----------------------------
@@ -161,6 +124,11 @@ export class WalletService {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
 
         return this.tokenService.transfer(address, to, token, amount, privateKey);
+    }
+
+    async getTokensBalance(accountId = 0): Promise<TokenAmount[]> {
+        const address = this.getAddress(accountId);
+        return this.tokenService.getBalance(address);
     }
 
     // ---------------------------
@@ -189,5 +157,10 @@ export class WalletService {
     async getDAOStatistics(accountId = 0): Promise<DAOStatistics> {
         const address = this.getAddress(accountId);
         return this.daoService.getStatistics(address);
+    }
+
+    async getDAOBalance(accountId = 0): Promise<DAOBalance> {
+        const address = this.getAddress(accountId);
+        return this.daoService.getBalance(address);
     }
 }

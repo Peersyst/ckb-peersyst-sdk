@@ -3,6 +3,12 @@ import { common } from "@ckb-lumos/common-scripts";
 import { ConnectionService } from "./connection.service";
 import { TransactionService } from "./transaction.service";
 
+export interface CKBBalance {
+    totalBalance: bigint;
+    occupiedBalance: bigint;
+    freeBalance: bigint;
+}
+
 export class CKBService {
     private readonly connection: ConnectionService;
     private readonly transactionService: TransactionService;
@@ -23,5 +29,23 @@ export class CKBService {
         txSkeleton = await common.payFee(txSkeleton, [from], this.transactionService.defaultFee, null, this.connection.getConfigAsObject());
 
         return this.transactionService.signTransaction(txSkeleton, privateKey);
+    }
+
+    async getBalance(address: string): Promise<CKBBalance> {
+        const collector = this.connection.getIndexer().collector({
+            lock: this.connection.getLockFromAddress(address),
+        });
+
+        let totalBalance = BigInt(0);
+        let occupiedBalance = BigInt(0);
+        for await (const cell of collector.collect()) {
+            totalBalance += BigInt(cell.cell_output.capacity);
+            if (cell.cell_output.type) {
+                occupiedBalance += BigInt(cell.cell_output.capacity);
+            }
+        }
+        const freeBalance = totalBalance - occupiedBalance;
+
+        return { totalBalance, occupiedBalance, freeBalance };
     }
 }
