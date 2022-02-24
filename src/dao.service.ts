@@ -54,7 +54,7 @@ export class DAOService {
         });
 
         for await (const inputCell of collector.collect()) {
-            if (cellType === DAOCellType.WITHDRAW && inputCell.data === this.depositDaoData) {
+            if (cellType === DAOCellType.WITHDRAW && this.isCellDeposit(inputCell)) {
                 continue;
             }
 
@@ -78,7 +78,7 @@ export class DAOService {
             let maxWithdraw = BigInt(0);
             daoDeposit += BigInt(cells[i].cell_output.capacity);
 
-            if (cells[i].data === this.depositDaoData) {
+            if (this.isCellDeposit(cells[i])) {
                 maxWithdraw = await this.getDepositCellMaximumWithdraw(cells[i]);
             } else {
                 maxWithdraw = await this.getWithdrawCellMaximumWithdraw(cells[i]);
@@ -165,11 +165,28 @@ export class DAOService {
         };
     }
 
+    isCellDeposit(cell: Cell): boolean {
+        return cell.data === this.depositDaoData;
+    }
+
+    async isCellUnlockable(cell: Cell): Promise<boolean> {
+        let depositBlockHash: string;
+
+        if (this.isCellDeposit(cell)) {
+            depositBlockHash = cell.block_hash;
+        } else {
+            const depositCell = await this.getDepositCellFromWithdrawCell(cell);
+            depositBlockHash = depositCell.block_hash;
+        }
+        const depositHeader = await this.connection.getBlockHeaderFromHash(depositBlockHash);
+
+        return parseInt(depositHeader.timestamp, 16) + this.unlockMinTime < Date.now();
+    }
+
     async unlock(withdrawCell: Cell, privateKey: string, from: string, to: string): Promise<string> {
         let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getIndexer() });
         const depositCell = await this.getDepositCellFromWithdrawCell(withdrawCell);
-        const depositHeader = await this.connection.getBlockHeaderFromHash(depositCell.block_hash);
-        if (parseInt(depositHeader.timestamp, 16) + this.unlockMinTime > Date.now()) {
+        if (!this.isCellUnlockable(depositCell)) {
             throw new Error("Cell can not be unlocked. Minimum time is 30 days.");
         }
 
@@ -184,7 +201,7 @@ export class DAOService {
 
         const cells = await this.getCells(address, DAOCellType.ALL);
         for (let i = 0; i < cells.length; i += 1) {
-            if (cells[i].data === this.depositDaoData) {
+            if (this.isCellDeposit(cells[i])) {
                 const maxWithdraw = await this.getDepositCellMaximumWithdraw(cells[i]);
                 statistics.maximumWithdraw += maxWithdraw;
                 const earliestSince = await this.getDepositDaoEarliestSince(cells[i]);
@@ -256,7 +273,7 @@ export class DAOService {
             let maxWithdraw = BigInt(0);
             let timestamp: number;
 
-            if (cells[i].data === this.depositDaoData) {
+            if (this.isCellDeposit(cells[i])) {
                 maxWithdraw = await this.getDepositCellMaximumWithdraw(cells[i]);
                 const blockHeader = await this.connection.getBlockHeaderFromNumber(cells[i].block_number);
                 timestamp = parseInt(blockHeader.timestamp, 16);

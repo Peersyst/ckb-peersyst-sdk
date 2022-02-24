@@ -140,6 +140,22 @@ export class WalletService {
         return this.daoService.deposit(amount, address, address, privateKey);
     }
 
+    async withdrawAndUnlock(cell: Cell, mnemo: string, accountId = 0): Promise<string> {
+        const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
+        if (!this.daoService.isCellDeposit(cell)) {
+            console.warn("Cell already withrawed. Unlocking...");
+            return this.unlock(cell, mnemo, accountId);
+        }
+        if (!this.daoService.isCellUnlockable(cell)) {
+            throw new Error("Cell can not be unlocked. Minimum time is 30 days.");
+        }
+
+        const withdrawTxHash = this.daoService.withdraw(cell, privateKey, address);
+        // Wait transaction is commited. Search tx with status, careful with map!!!
+        // Search new withdraw cell to unlock
+        return this.daoService.unlock(cell, privateKey, address, address);
+    }
+
     // Merge to simple withdraw+unlock
     async withdrawFromDAO(cell: Cell, mnemo: string, accountId = 0): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
