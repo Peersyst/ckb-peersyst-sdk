@@ -45,7 +45,7 @@ export class TransactionService {
         let cell: TransactionWithStatus;
         for await (cell of transactionCollector.collect()) {
             if (!this.transactionMap.has(cell.transaction.hash)) {
-                const block = await this.connection.getBlockFromHash(cell.tx_status.block_hash);
+                const header = await this.connection.getBlockHeaderFromHash(cell.tx_status.block_hash);
 
                 const inputs: DataRow[] = [];
                 for (let i = 0; i < cell.transaction.inputs.length; i += 1) {
@@ -77,8 +77,8 @@ export class TransactionService {
                     inputs,
                     outputs,
                     blockHash: cell.tx_status.block_hash,
-                    blockNumber: parseInt(block.header.number, 16),
-                    timestamp: new Date(parseInt(block.header.timestamp, 16)),
+                    blockNumber: parseInt(header.number, 16),
+                    timestamp: new Date(parseInt(header.timestamp, 16)),
                 });
             }
 

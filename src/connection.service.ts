@@ -1,5 +1,5 @@
-import { Indexer, RPC, config, Script, helpers } from "@ckb-lumos/lumos";
-import { TransactionWithStatus, Block, ChainInfo, Indexer as IndexerType } from "@ckb-lumos/base";
+import { RPC, config, Script, helpers, OutPoint, Indexer } from "@ckb-lumos/lumos";
+import { TransactionWithStatus, Header, ChainInfo, CellWithStatus, Indexer as IndexerType } from "@ckb-lumos/base";
 
 // AGGRON4 for test, LINA for main
 const { AGGRON4, LINA } = config.predefined;
@@ -18,7 +18,8 @@ export class ConnectionService {
     private readonly rpc: RPC;
     private readonly indexer: IndexerType;
     private readonly config: configType;
-    private blockMap = new Map<string, Block>();
+    private blockHeaderNumberMap = new Map<string, Header>();
+    private blockHeaderHashMap = new Map<string, Header>();
     private transactionMap = new Map<string, TransactionWithStatus>();
 
     constructor(ckbUrl: string, indexerUrl: string, env: Environments) {
@@ -35,12 +36,35 @@ export class ConnectionService {
         return this.rpc.get_blockchain_info();
     }
 
-    async getBlockFromHash(blockHash: string): Promise<Block> {
-        if (!this.blockMap.has(blockHash)) {
-            const block = await this.rpc.get_block(blockHash);
-            this.blockMap.set(blockHash, block);
+    setBlockHeaderMaps(header: Header): void {
+        this.blockHeaderHashMap.set(header.hash, header);
+        this.blockHeaderNumberMap.set(header.number, header);
+    }
+
+    async getCurrentBlockHeader(): Promise<Header> {
+        const lastBlockHeader = await this.rpc.get_tip_header();
+        this.setBlockHeaderMaps(lastBlockHeader);
+        return lastBlockHeader;
+    }
+
+    async getBlockHeaderFromHash(blockHash: string): Promise<Header> {
+        if (!this.blockHeaderHashMap.has(blockHash)) {
+            const header = await this.rpc.get_header(blockHash);
+            this.setBlockHeaderMaps(header);
         }
-        return this.blockMap.get(blockHash);
+        return this.blockHeaderHashMap.get(blockHash);
+    }
+
+    async getBlockHeaderFromNumber(blockNumber: string): Promise<Header> {
+        if (!this.blockHeaderNumberMap.has(blockNumber)) {
+            const header = await this.rpc.get_header_by_number(blockNumber);
+            this.setBlockHeaderMaps(header);
+        }
+        return this.blockHeaderNumberMap.get(blockNumber);
+    }
+
+    async getCell(outPoint: OutPoint): Promise<CellWithStatus> {
+        return this.rpc.get_live_cell(outPoint, true);
     }
 
     async getTransactionFromHash(transactionHash: string): Promise<TransactionWithStatus> {

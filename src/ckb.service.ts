@@ -1,5 +1,5 @@
 import { TransactionSkeleton } from "@ckb-lumos/helpers";
-import { secp256k1Blake160 } from "@ckb-lumos/common-scripts";
+import { common } from "@ckb-lumos/common-scripts";
 import { ConnectionService } from "./connection.service";
 import { TransactionService } from "./transaction.service";
 
@@ -19,13 +19,8 @@ export class CKBService {
         }
 
         let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getIndexer() });
-        txSkeleton = await secp256k1Blake160.transfer(txSkeleton, from, to, amount, this.connection.getConfigAsObject());
-        txSkeleton = await secp256k1Blake160.payFee(
-            txSkeleton,
-            from,
-            this.transactionService.defaultFee,
-            this.connection.getConfigAsObject(),
-        );
+        txSkeleton = await common.transfer(txSkeleton, [from], to, amount, null, null, this.connection.getConfigAsObject());
+        txSkeleton = await common.payFee(txSkeleton, [from], this.transactionService.defaultFee, null, this.connection.getConfigAsObject());
 
         return this.transactionService.signTransaction(txSkeleton, privateKey);
     }
