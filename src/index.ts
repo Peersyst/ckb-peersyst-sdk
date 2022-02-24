@@ -30,6 +30,7 @@ wallet.getBalance().then((balance) => console.log("getBalance: ", balance));
 
 // DAO functions
 // wallet.getDAOBalance().then((dao) => console.log("getDAOBalance: ", dao));
+wallet.getDAOUnlockableAmounts().then((dao) => console.log("getDAOUnlockableAmounts: ", dao));
 // wallet.getDAOStatistics().then((statistics) => console.log(statistics));
 // wallet.depositInDAO(BigInt(5000 * 10 ** 8), mnemonicKeyAcc2).then((txHash) => console.log(txHash));
 // wallet.getDAOCells(addressAcc2, DAOCellType.DEPOSIT).then((cells) =>

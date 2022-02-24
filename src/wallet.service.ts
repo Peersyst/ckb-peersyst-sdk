@@ -3,7 +3,7 @@ import { ConnectionService } from "./connection.service";
 import { TransactionService, Transaction } from "./transaction.service";
 import { TokenService, TokenAmount } from "./token.service";
 import { CKBBalance, CKBService } from "./ckb.service";
-import { DAOBalance, DAOCellType, DAOService, DAOStatistics } from "./dao.service";
+import { DAOBalance, DAOCellType, DAOService, DAOStatistics, DAOUnlockableAmount } from "./dao.service";
 import { Cell } from "@ckb-lumos/lumos";
 
 export enum AddressScriptType {
@@ -140,20 +140,16 @@ export class WalletService {
         return this.daoService.deposit(amount, address, address, privateKey);
     }
 
-    // Merge to simple withdraw
+    // Merge to simple withdraw+unlock
     async withdrawFromDAO(cell: Cell, mnemo: string, accountId = 0): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
         return this.daoService.withdraw(cell, privateKey, address);
     }
 
+    // Merge to simple withdraw+unlock
     async unlock(cell: Cell, mnemo: string, accountId = 0): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
         return this.daoService.unlock(cell, privateKey, address, address);
-    }
-
-    // To remove, no user friendly
-    async getDAOCells(address: string, cellType: DAOCellType = DAOCellType.ALL): Promise<Cell[]> {
-        return this.daoService.getCells(address, cellType);
     }
 
     async getDAOStatistics(accountId = 0): Promise<DAOStatistics> {
@@ -164,5 +160,15 @@ export class WalletService {
     async getDAOBalance(accountId = 0): Promise<DAOBalance> {
         const address = this.getAddress(accountId);
         return this.daoService.getBalance(address);
+    }
+
+    async getDAOUnlockableAmounts(accountId = 0): Promise<DAOUnlockableAmount[]> {
+        const address = this.getAddress(accountId);
+        return this.daoService.getUnlockableAmounts(address);
+    }
+
+    // To remove, no user friendly
+    async getDAOCells(address: string, cellType: DAOCellType = DAOCellType.ALL): Promise<Cell[]> {
+        return this.daoService.getCells(address, cellType);
     }
 }

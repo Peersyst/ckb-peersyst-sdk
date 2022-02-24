@@ -14,6 +14,14 @@ export interface DAOBalance {
     daoCompensation: bigint;
 }
 
+export interface DAOUnlockableAmount {
+    type: "total" | "single";
+    amount: bigint;
+    compensation: bigint;
+    unlockable: boolean;
+    unlockableDate: Date;
+}
+
 export enum DAOCellType {
     DEPOSIT = "deposit",
     WITHDRAW = "withdraw",
@@ -226,5 +234,61 @@ export class DAOService {
         const depositBlockHeader = await this.connection.getBlockHeaderFromHash(depositTransaction.tx_status.block_hash);
 
         return dao.calculateDaoEarliestSince(depositBlockHeader.epoch, withdrawBlockHeader.epoch);
+    }
+
+    async getUnlockableAmounts(address: string): Promise<DAOUnlockableAmount[]> {
+        const unlockableAmounts: DAOUnlockableAmount[] = [];
+        const cells = await this.getCells(address);
+
+        let totalAmount = BigInt(0);
+        let totalCompensation = BigInt(0);
+        let maxUnlockableDate = new Date();
+        let unlockable = true;
+
+        for (let i = 0; i < cells.length; i += 1) {
+            const unlockableAmount: DAOUnlockableAmount = {
+                amount: BigInt(cells[i].cell_output.capacity),
+                compensation: BigInt(0),
+                unlockable: true,
+                unlockableDate: new Date(),
+                type: "single",
+            };
+            let maxWithdraw = BigInt(0);
+            let timestamp: number;
+
+            if (cells[i].data === this.depositDaoData) {
+                maxWithdraw = await this.getDepositCellMaximumWithdraw(cells[i]);
+                const blockHeader = await this.connection.getBlockHeaderFromNumber(cells[i].block_number);
+                timestamp = parseInt(blockHeader.timestamp, 16);
+            } else {
+                maxWithdraw = await this.getWithdrawCellMaximumWithdraw(cells[i]);
+                const { txHash } = await this.findCorrectInputFromWithdrawCell(cells[i]);
+                const depositTransaction = await this.connection.getTransactionFromHash(txHash);
+                const depositBlockHeader = await this.connection.getBlockHeaderFromHash(depositTransaction.tx_status.block_hash);
+                timestamp = parseInt(depositBlockHeader.timestamp, 16);
+            }
+
+            unlockableAmount.compensation = maxWithdraw - unlockableAmount.amount;
+            unlockableAmount.unlockableDate = new Date(timestamp + this.unlockMinTime);
+            unlockableAmount.unlockable = timestamp + this.unlockMinTime < Date.now();
+            unlockableAmounts.push(unlockableAmount);
+
+            totalAmount += unlockableAmount.amount;
+            totalCompensation += unlockableAmount.compensation;
+            unlockable = unlockable && unlockableAmount.unlockable;
+            if (maxUnlockableDate < unlockableAmount.unlockableDate) {
+                maxUnlockableDate = unlockableAmount.unlockableDate;
+            }
+        }
+
+        unlockableAmounts.push({
+            amount: totalAmount,
+            compensation: totalCompensation,
+            unlockable,
+            unlockableDate: maxUnlockableDate,
+            type: "total",
+        });
+
+        return unlockableAmounts;
     }
 }
