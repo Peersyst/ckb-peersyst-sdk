@@ -26,6 +26,7 @@ export class DAOService {
     private readonly daoCellSize = BigInt(102 * 10 ** 8);
     private readonly daoScriptArgs = "0x";
     private readonly depositDaoData = "0x0000000000000000";
+    private readonly unlockMinTime = 30 * 24 * 60 * 60 * 1000; // 30 days in milliseconds
 
     constructor(connectionService: ConnectionService, transactionService: TransactionService) {
         this.connection = connectionService;
@@ -107,13 +108,62 @@ export class DAOService {
         return this.transactionService.signTransaction(txSkeleton, privateKey);
     }
 
-    async getDepositCellFromWithdraw(withdrawCell: Cell): Promise<Cell> {
-        return withdrawCell;
+    async findCorrectInputFromWithdrawCell(withdrawCell: Cell): Promise<{ index: string; txHash: string }> {
+        const transaction = await this.connection.getTransactionFromHash(withdrawCell.out_point.tx_hash);
+
+        let index: string;
+        let txHash: string;
+        for (let i = 0; i < transaction.transaction.inputs.length && !index; i += 1) {
+            const prevOut = transaction.transaction.inputs[i].previous_output;
+
+            const possibleTx = await this.connection.getTransactionFromHash(prevOut.tx_hash);
+            const output = possibleTx.transaction.outputs[parseInt(prevOut.index, 16)];
+            if (
+                output.type &&
+                output.capacity === withdrawCell.cell_output.capacity &&
+                output.lock.args === withdrawCell.cell_output.lock.args &&
+                output.lock.hash_type === withdrawCell.cell_output.lock.hash_type &&
+                output.lock.code_hash === withdrawCell.cell_output.lock.code_hash &&
+                output.type.args === withdrawCell.cell_output.type.args &&
+                output.type.hash_type === withdrawCell.cell_output.type.hash_type &&
+                output.type.code_hash === withdrawCell.cell_output.type.code_hash
+            ) {
+                index = prevOut.index;
+                txHash = prevOut.tx_hash;
+            }
+        }
+
+        return { index, txHash };
+    }
+
+    async getDepositCellFromWithdrawCell(withdrawCell: Cell): Promise<Cell> {
+        const { index, txHash } = await this.findCorrectInputFromWithdrawCell(withdrawCell);
+        const depositTransaction = await this.connection.getTransactionFromHash(txHash);
+        const depositBlockHeader = await this.connection.getBlockHeaderFromHash(depositTransaction.tx_status.block_hash);
+
+        return {
+            cell_output: {
+                capacity: withdrawCell.cell_output.capacity,
+                lock: { ...withdrawCell.cell_output.lock },
+                type: { ...withdrawCell.cell_output.type },
+            },
+            out_point: {
+                tx_hash: txHash,
+                index,
+            },
+            data: this.depositDaoData,
+            block_hash: depositBlockHeader.hash,
+            block_number: depositBlockHeader.number,
+        };
     }
 
     async unlock(withdrawCell: Cell, privateKey: string, from: string, to: string): Promise<string> {
         let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getIndexer() });
-        const depositCell = await this.getDepositCellFromWithdraw(withdrawCell);
+        const depositCell = await this.getDepositCellFromWithdrawCell(withdrawCell);
+        const depositHeader = await this.connection.getBlockHeaderFromHash(depositCell.block_hash);
+        if (parseInt(depositHeader.timestamp, 16) + this.unlockMinTime > Date.now()) {
+            throw new Error("Cell can not be unlocked. Minimum time is 30 days.");
+        }
 
         txSkeleton = await dao.unlock(txSkeleton, depositCell, withdrawCell, to, from, this.connection.getConfigAsObject());
         txSkeleton = await common.payFee(txSkeleton, [from], this.transactionService.defaultFee, null, this.connection.getConfigAsObject());
@@ -155,28 +205,25 @@ export class DAOService {
 
     async getWithdrawCellMaximumWithdraw(withdrawCell: Cell): Promise<bigint> {
         const withdrawBlockHeader = await this.connection.getBlockHeaderFromHash(withdrawCell.block_hash);
-        const transaction = await this.connection.getTransactionFromHash(withdrawCell.out_point.tx_hash);
-        // TODO: find input cell, maybe create function
-        const depositTxHash = transaction.transaction.inputs[0].previous_output.tx_hash;
-        const depositTransaction = await this.connection.getTransactionFromHash(depositTxHash);
+        const { txHash } = await this.findCorrectInputFromWithdrawCell(withdrawCell);
+        const depositTransaction = await this.connection.getTransactionFromHash(txHash);
         const depositBlockHeader = await this.connection.getBlockHeaderFromHash(depositTransaction.tx_status.block_hash);
 
         return dao.calculateMaximumWithdraw(withdrawCell, depositBlockHeader.dao, withdrawBlockHeader.dao);
     }
 
-    async getWithdrawDaoEarliestSince(withdrawCell: Cell): Promise<bigint> {
-        const withdrawBlockHeader = await this.connection.getBlockHeaderFromHash(withdrawCell.block_hash);
-        const transaction = await this.connection.getTransactionFromHash(withdrawCell.out_point.tx_hash);
-        const depositTxHash = transaction.transaction.inputs[0].previous_output.tx_hash;
-        const depositTransaction = await this.connection.getTransactionFromHash(depositTxHash);
-        const depositBlockHeader = await this.connection.getBlockHeaderFromHash(depositTransaction.tx_status.block_hash);
+    async getDepositDaoEarliestSince(depositCell: Cell): Promise<bigint> {
+        const depositBlockHeader = await this.connection.getBlockHeaderFromHash(depositCell.block_hash);
+        const withdrawBlockHeader = await this.connection.getCurrentBlockHeader();
 
         return dao.calculateDaoEarliestSince(depositBlockHeader.epoch, withdrawBlockHeader.epoch);
     }
 
-    async getDepositDaoEarliestSince(depositCell: Cell): Promise<bigint> {
-        const depositBlockHeader = await this.connection.getBlockHeaderFromHash(depositCell.block_hash);
-        const withdrawBlockHeader = await this.connection.getCurrentBlockHeader();
+    async getWithdrawDaoEarliestSince(withdrawCell: Cell): Promise<bigint> {
+        const withdrawBlockHeader = await this.connection.getBlockHeaderFromHash(withdrawCell.block_hash);
+        const { txHash } = await this.findCorrectInputFromWithdrawCell(withdrawCell);
+        const depositTransaction = await this.connection.getTransactionFromHash(txHash);
+        const depositBlockHeader = await this.connection.getBlockHeaderFromHash(depositTransaction.tx_status.block_hash);
 
         return dao.calculateDaoEarliestSince(depositBlockHeader.epoch, withdrawBlockHeader.epoch);
     }

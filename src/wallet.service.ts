@@ -3,7 +3,7 @@ import { ConnectionService } from "./connection.service";
 import { TransactionService, Transaction } from "./transaction.service";
 import { TokenService, TokenAmount } from "./token.service";
 import { CKBBalance, CKBService } from "./ckb.service";
-import { DAOBalance, DAOService, DAOStatistics } from "./dao.service";
+import { DAOBalance, DAOCellType, DAOService, DAOStatistics } from "./dao.service";
 import { Cell } from "@ckb-lumos/lumos";
 
 export enum AddressScriptType {
@@ -134,24 +134,26 @@ export class WalletService {
     // ---------------------------
     // -- DAO Service functions --
     // ---------------------------
-    async depositInDAO(amount: bigint, mnemo: string, to: string, accountId = 0): Promise<string> {
+    async depositInDAO(amount: bigint, mnemo: string, accountId = 0): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
 
         return this.daoService.deposit(amount, address, address, privateKey);
     }
 
+    // Merge to simple withdraw
     async withdrawFromDAO(cell: Cell, mnemo: string, accountId = 0): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
         return this.daoService.withdraw(cell, privateKey, address);
     }
 
-    async unlock(cell: Cell, mnemo: string, to: string, accountId = 0): Promise<string> {
+    async unlock(cell: Cell, mnemo: string, accountId = 0): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
-        return this.daoService.unlock(cell, privateKey, address, to);
+        return this.daoService.unlock(cell, privateKey, address, address);
     }
 
-    async getDAOCells(address: string): Promise<Cell[]> {
-        return this.daoService.getCells(address);
+    // To remove, no user friendly
+    async getDAOCells(address: string, cellType: DAOCellType = DAOCellType.ALL): Promise<Cell[]> {
+        return this.daoService.getCells(address, cellType);
     }
 
     async getDAOStatistics(accountId = 0): Promise<DAOStatistics> {
