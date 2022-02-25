@@ -165,6 +165,18 @@ export class DAOService {
         };
     }
 
+    async getWithdrawCellFromCapacityTx(capacity: string, address: string, txHash: string): Promise<Cell> {
+        const cells = await this.getCells(address, DAOCellType.WITHDRAW);
+
+        for (let i = 0; i < cells.length; i += 1) {
+            if (cells[i].cell_output.capacity === capacity && cells[i].out_point.tx_hash === txHash) {
+                return cells[i];
+            }
+        }
+
+        return null;
+    }
+
     isCellDeposit(cell: Cell): boolean {
         return cell.data === this.depositDaoData;
     }

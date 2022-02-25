@@ -22,6 +22,13 @@ export interface Transaction {
     timestamp: Date;
 }
 
+export enum TransactionStatus {
+    PENDING = "pending",
+    PROPOSED = "proposed",
+    COMMITTED = "committed",
+    REJECTED = "rejected",
+}
+
 export class TransactionService {
     private readonly connection: ConnectionService;
     private readonly TransactionCollector: any;

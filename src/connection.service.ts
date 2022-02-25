@@ -67,8 +67,8 @@ export class ConnectionService {
         return this.rpc.get_live_cell(outPoint, true);
     }
 
-    async getTransactionFromHash(transactionHash: string): Promise<TransactionWithStatus> {
-        if (!this.transactionMap.has(transactionHash)) {
+    async getTransactionFromHash(transactionHash: string, useMap = true): Promise<TransactionWithStatus> {
+        if (!useMap || !this.transactionMap.has(transactionHash)) {
             const transaction = await this.rpc.get_transaction(transactionHash);
             this.transactionMap.set(transactionHash, transaction);
         }

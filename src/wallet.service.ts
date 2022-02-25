@@ -1,10 +1,11 @@
 import { mnemonic, ExtendedPrivateKey, AccountExtendedPublicKey, AddressType } from "@ckb-lumos/hd";
 import { ConnectionService } from "./connection.service";
-import { TransactionService, Transaction } from "./transaction.service";
+import { TransactionService, Transaction, TransactionStatus } from "./transaction.service";
 import { TokenService, TokenAmount } from "./token.service";
 import { CKBBalance, CKBService } from "./ckb.service";
 import { DAOBalance, DAOCellType, DAOService, DAOStatistics, DAOUnlockableAmount } from "./dao.service";
 import { Cell } from "@ckb-lumos/lumos";
+import { TransactionWithStatus } from "@ckb-lumos/base";
 
 export enum AddressScriptType {
     SECP256K1_BLAKE160 = "SECP256K1_BLAKE160",
@@ -17,6 +18,8 @@ export interface Balance {
     tokens: TokenAmount[];
     dao: DAOBalance;
 }
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class WalletService {
     private readonly connection: ConnectionService;
@@ -144,28 +147,29 @@ export class WalletService {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
         if (!this.daoService.isCellDeposit(cell)) {
             console.warn("Cell already withrawed. Unlocking...");
-            return this.unlock(cell, mnemo, accountId);
+            return this.daoService.unlock(cell, privateKey, address, address);
         }
         if (!this.daoService.isCellUnlockable(cell)) {
             throw new Error("Cell can not be unlocked. Minimum time is 30 days.");
         }
 
-        const withdrawTxHash = this.daoService.withdraw(cell, privateKey, address);
-        // Wait transaction is commited. Search tx with status, careful with map!!!
+        const withdrawTxHash = await this.daoService.withdraw(cell, privateKey, address);
+        let commited = false;
+        let transaction: TransactionWithStatus;
+
+        // Should be done in a queue
+        while (!commited) {
+            transaction = await this.connection.getTransactionFromHash(withdrawTxHash, false);
+            commited = transaction.tx_status.block_hash && transaction.tx_status.status === TransactionStatus.COMMITTED;
+
+            if (!commited) {
+                await sleep(1000);
+            }
+        }
+
         // Search new withdraw cell to unlock
-        return this.daoService.unlock(cell, privateKey, address, address);
-    }
-
-    // Merge to simple withdraw+unlock
-    async withdrawFromDAO(cell: Cell, mnemo: string, accountId = 0): Promise<string> {
-        const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
-        return this.daoService.withdraw(cell, privateKey, address);
-    }
-
-    // Merge to simple withdraw+unlock
-    async unlock(cell: Cell, mnemo: string, accountId = 0): Promise<string> {
-        const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
-        return this.daoService.unlock(cell, privateKey, address, address);
+        const withdrawCell = await this.daoService.getWithdrawCellFromCapacityTx(cell.cell_output.capacity, address, withdrawTxHash);
+        return this.daoService.unlock(withdrawCell, privateKey, address, address);
     }
 
     async getDAOStatistics(accountId = 0): Promise<DAOStatistics> {
