@@ -143,7 +143,7 @@ export class WalletService {
         return this.daoService.deposit(amount, address, address, privateKey);
     }
 
-    async withdrawAndUnlock(cell: Cell, mnemo: string, accountId = 0): Promise<string> {
+    async withdrawAndUnlockFromCell(cell: Cell, mnemo: string, accountId = 0): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
         if (!this.daoService.isCellDeposit(cell)) {
             console.warn("Cell already withrawed. Unlocking...");
@@ -170,6 +170,23 @@ export class WalletService {
         // Search new withdraw cell to unlock
         const withdrawCell = await this.daoService.getWithdrawCellFromCapacityTx(cell.cell_output.capacity, address, withdrawTxHash);
         return this.daoService.unlock(withdrawCell, privateKey, address, address);
+    }
+
+    async withdrawAndUnlock(unlockableAmount: DAOUnlockableAmount, mnemo: string, accountId = 0): Promise<string> {
+        const address = this.getAddress(accountId);
+
+        if (unlockableAmount.type === "total") {
+            const cells = await this.daoService.getCells(address);
+
+            for (let i = 0; i < cells.length; i += 1) {
+                await this.withdrawAndUnlockFromCell(cells[i], mnemo, accountId);
+            }
+
+            return "All amount unlocked sucessfully";
+        }
+
+        const cell = await this.daoService.findCellFromUnlockableAmount(unlockableAmount, address);
+        return this.withdrawAndUnlockFromCell(cell, mnemo, accountId);
     }
 
     async getDAOStatistics(accountId = 0): Promise<DAOStatistics> {

@@ -20,6 +20,7 @@ export interface DAOUnlockableAmount {
     compensation: bigint;
     unlockable: boolean;
     unlockableDate: Date;
+    txHash: string;
 }
 
 export enum DAOCellType {
@@ -39,6 +40,24 @@ export class DAOService {
     constructor(connectionService: ConnectionService, transactionService: TransactionService) {
         this.connection = connectionService;
         this.transactionService = transactionService;
+    }
+
+    isCellDeposit(cell: Cell): boolean {
+        return cell.data === this.depositDaoData;
+    }
+
+    async isCellUnlockable(cell: Cell): Promise<boolean> {
+        let depositBlockHash: string;
+
+        if (this.isCellDeposit(cell)) {
+            depositBlockHash = cell.block_hash;
+        } else {
+            const depositCell = await this.getDepositCellFromWithdrawCell(cell);
+            depositBlockHash = depositCell.block_hash;
+        }
+        const depositHeader = await this.connection.getBlockHeaderFromHash(depositBlockHash);
+
+        return parseInt(depositHeader.timestamp, 16) + this.unlockMinTime < Date.now();
     }
 
     async getCells(address: string, cellType: DAOCellType = DAOCellType.ALL): Promise<Cell[]> {
@@ -116,6 +135,19 @@ export class DAOService {
         return this.transactionService.signTransaction(txSkeleton, privateKey);
     }
 
+    async unlock(withdrawCell: Cell, privateKey: string, from: string, to: string): Promise<string> {
+        let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getIndexer() });
+        const depositCell = await this.getDepositCellFromWithdrawCell(withdrawCell);
+        if (!this.isCellUnlockable(depositCell)) {
+            throw new Error("Cell can not be unlocked. Minimum time is 30 days.");
+        }
+
+        txSkeleton = await dao.unlock(txSkeleton, depositCell, withdrawCell, to, from, this.connection.getConfigAsObject());
+        txSkeleton = await common.payFee(txSkeleton, [from], this.transactionService.defaultFee, null, this.connection.getConfigAsObject());
+
+        return this.transactionService.signTransaction(txSkeleton, privateKey);
+    }
+
     async findCorrectInputFromWithdrawCell(withdrawCell: Cell): Promise<{ index: string; txHash: string }> {
         const transaction = await this.connection.getTransactionFromHash(withdrawCell.out_point.tx_hash);
 
@@ -142,6 +174,19 @@ export class DAOService {
         }
 
         return { index, txHash };
+    }
+
+    async findCellFromUnlockableAmount(unlockableAmount: DAOUnlockableAmount, address: string): Promise<Cell> {
+        const cells = await this.getCells(address);
+        const capacity = `0x${unlockableAmount.amount.toString(16)}`;
+
+        for (let i = 0; i < cells.length; i += 1) {
+            if (cells[i].cell_output.capacity === capacity && cells[i].out_point.tx_hash === unlockableAmount.txHash) {
+                return cells[i];
+            }
+        }
+
+        return null;
     }
 
     async getDepositCellFromWithdrawCell(withdrawCell: Cell): Promise<Cell> {
@@ -175,37 +220,6 @@ export class DAOService {
         }
 
         return null;
-    }
-
-    isCellDeposit(cell: Cell): boolean {
-        return cell.data === this.depositDaoData;
-    }
-
-    async isCellUnlockable(cell: Cell): Promise<boolean> {
-        let depositBlockHash: string;
-
-        if (this.isCellDeposit(cell)) {
-            depositBlockHash = cell.block_hash;
-        } else {
-            const depositCell = await this.getDepositCellFromWithdrawCell(cell);
-            depositBlockHash = depositCell.block_hash;
-        }
-        const depositHeader = await this.connection.getBlockHeaderFromHash(depositBlockHash);
-
-        return parseInt(depositHeader.timestamp, 16) + this.unlockMinTime < Date.now();
-    }
-
-    async unlock(withdrawCell: Cell, privateKey: string, from: string, to: string): Promise<string> {
-        let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getIndexer() });
-        const depositCell = await this.getDepositCellFromWithdrawCell(withdrawCell);
-        if (!this.isCellUnlockable(depositCell)) {
-            throw new Error("Cell can not be unlocked. Minimum time is 30 days.");
-        }
-
-        txSkeleton = await dao.unlock(txSkeleton, depositCell, withdrawCell, to, from, this.connection.getConfigAsObject());
-        txSkeleton = await common.payFee(txSkeleton, [from], this.transactionService.defaultFee, null, this.connection.getConfigAsObject());
-
-        return this.transactionService.signTransaction(txSkeleton, privateKey);
     }
 
     async getStatistics(address: string): Promise<DAOStatistics> {
@@ -281,6 +295,7 @@ export class DAOService {
                 unlockable: true,
                 unlockableDate: new Date(),
                 type: "single",
+                txHash: cells[i].out_point.tx_hash,
             };
             let maxWithdraw = BigInt(0);
             let timestamp: number;
@@ -316,6 +331,7 @@ export class DAOService {
             unlockable,
             unlockableDate: maxUnlockableDate,
             type: "total",
+            txHash: null,
         });
 
         return unlockableAmounts;
