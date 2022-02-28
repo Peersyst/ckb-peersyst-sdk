@@ -6,6 +6,7 @@ import { CKBBalance, CKBService } from "./ckb.service";
 import { DAOBalance, DAOCellType, DAOService, DAOStatistics, DAOUnlockableAmount } from "./dao.service";
 import { Cell } from "@ckb-lumos/lumos";
 import { TransactionWithStatus } from "@ckb-lumos/base";
+import { Nft, NftService } from "./nft.service";
 
 export enum AddressScriptType {
     SECP256K1_BLAKE160 = "SECP256K1_BLAKE160",
@@ -16,6 +17,7 @@ export enum AddressScriptType {
 export interface Balance {
     ckb: CKBBalance;
     tokens: TokenAmount[];
+    nfts: Nft[];
     dao: DAOBalance;
 }
 
@@ -27,6 +29,7 @@ export class WalletService {
     private readonly ckbService: CKBService;
     private readonly tokenService: TokenService;
     private readonly daoService: DAOService;
+    private readonly nftService: NftService;
     private readonly accountPublicKey: AccountExtendedPublicKey;
     private readonly addressType = AddressType.Receiving;
     private addressMap = new Map<string, string>();
@@ -37,6 +40,7 @@ export class WalletService {
         this.ckbService = new CKBService(this.connection, this.transactionService);
         this.tokenService = new TokenService(this.connection, this.transactionService);
         this.daoService = new DAOService(this.connection, this.transactionService);
+        this.nftService = new NftService(this.connection);
 
         if (!mnemo) {
             mnemo = mnemonic.generateMnemonic();
@@ -86,9 +90,10 @@ export class WalletService {
         const address = this.getAddress(accountId);
         const ckb = await this.ckbService.getBalance(address);
         const tokens = await this.tokenService.getBalance(address);
+        const nfts = await this.nftService.getBalance(address);
         const dao = await this.daoService.getBalance(address);
 
-        return { ckb, tokens, dao };
+        return { ckb, tokens, dao, nfts };
     }
 
     // -----------------------------------
@@ -132,6 +137,15 @@ export class WalletService {
     async getTokensBalance(accountId = 0): Promise<TokenAmount[]> {
         const address = this.getAddress(accountId);
         return this.tokenService.getBalance(address);
+    }
+
+    // -----------------------------
+    // -- Token service functions --
+    // -----------------------------
+
+    async getNftsBalance(accountId = 0): Promise<Nft[]> {
+        const address = this.getAddress(accountId);
+        return this.nftService.getBalance(address);
     }
 
     // ---------------------------

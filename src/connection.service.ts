@@ -95,6 +95,10 @@ export class ConnectionService {
         return this.ckbUrl;
     }
 
+    getIndexerUrl(): string {
+        return this.indexerUrl;
+    }
+
     getAddressFromLock(lock: Script): string {
         return helpers.generateAddress(lock, { config: this.config });
     }
