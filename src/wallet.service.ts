@@ -3,10 +3,11 @@ import { ConnectionService } from "./connection.service";
 import { TransactionService, Transaction, TransactionStatus } from "./transaction.service";
 import { TokenService, TokenAmount } from "./token.service";
 import { CKBBalance, CKBService } from "./ckb.service";
-import { DAOBalance, DAOCellType, DAOService, DAOStatistics, DAOUnlockableAmount } from "./dao.service";
+import { DAOBalance, DAOService, DAOStatistics, DAOUnlockableAmount } from "./dao.service";
 import { Cell } from "@ckb-lumos/lumos";
 import { TransactionWithStatus } from "@ckb-lumos/base";
 import { Nft, NftService } from "./nft.service";
+import { Logger } from "./logger";
 
 export enum AddressScriptType {
     SECP256K1_BLAKE160 = "SECP256K1_BLAKE160",
@@ -32,9 +33,10 @@ export class WalletService {
     private readonly nftService: NftService;
     private readonly accountPublicKey: AccountExtendedPublicKey;
     private readonly addressType = AddressType.Receiving;
+    private readonly logger = new Logger(WalletService.name);
     private addressMap = new Map<string, string>();
 
-    constructor(connectionService: ConnectionService, mnemo?: string) {
+    constructor(connectionService: ConnectionService, mnemo: string) {
         this.connection = connectionService;
         this.transactionService = new TransactionService(this.connection);
         this.ckbService = new CKBService(this.connection, this.transactionService);
@@ -42,10 +44,11 @@ export class WalletService {
         this.daoService = new DAOService(this.connection, this.transactionService);
         this.nftService = new NftService(this.connection);
 
-        if (!mnemo) {
-            mnemo = mnemonic.generateMnemonic();
-        }
         this.accountPublicKey = WalletService.getPrivateKeyFromMnemonic(mnemo).toAccountExtendedPublicKey();
+    }
+
+    static createNewMnemonic() {
+        return mnemonic.generateMnemonic();
     }
 
     static getPrivateKeyFromMnemonic(mnemo: string): ExtendedPrivateKey {
@@ -160,10 +163,10 @@ export class WalletService {
     async withdrawAndUnlockFromCell(cell: Cell, mnemo: string, accountId = 0): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
         if (!this.daoService.isCellDeposit(cell)) {
-            console.warn("Cell already withrawed. Unlocking...");
+            this.logger.warn("Cell already withrawed. Unlocking...");
             return this.daoService.unlock(cell, privateKey, address, address);
         }
-        if (!this.daoService.isCellUnlockable(cell)) {
+        if (!(await this.daoService.isCellUnlockable(cell))) {
             throw new Error("Cell can not be unlocked. Minimum time is 30 days.");
         }
 
@@ -216,10 +219,5 @@ export class WalletService {
     async getDAOUnlockableAmounts(accountId = 0): Promise<DAOUnlockableAmount[]> {
         const address = this.getAddress(accountId);
         return this.daoService.getUnlockableAmounts(address);
-    }
-
-    // To remove, no user friendly
-    async getDAOCells(address: string, cellType: DAOCellType = DAOCellType.ALL): Promise<Cell[]> {
-        return this.daoService.getCells(address, cellType);
     }
 }

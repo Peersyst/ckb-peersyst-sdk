@@ -138,9 +138,10 @@ export class DAOService {
     async unlock(withdrawCell: Cell, privateKey: string, from: string, to: string): Promise<string> {
         let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getIndexer() });
         const depositCell = await this.getDepositCellFromWithdrawCell(withdrawCell);
-        if (!this.isCellUnlockable(depositCell)) {
+        if (!(await this.isCellUnlockable(depositCell))) {
             throw new Error("Cell can not be unlocked. Minimum time is 30 days.");
         }
+        return "holaa";
 
         txSkeleton = await dao.unlock(txSkeleton, depositCell, withdrawCell, to, from, this.connection.getConfigAsObject());
         txSkeleton = await common.payFee(txSkeleton, [from], this.transactionService.defaultFee, null, this.connection.getConfigAsObject());
