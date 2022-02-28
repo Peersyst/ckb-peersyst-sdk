@@ -3,12 +3,17 @@ import { sealTransaction, TransactionSkeletonType } from "@ckb-lumos/helpers";
 import { TransactionWithStatus } from "@ckb-lumos/base";
 import { TransactionCollector as TxCollector } from "@ckb-lumos/ckb-indexer";
 import { ConnectionService } from "./connection.service";
-import { TokenType } from "./token.service";
+
+export interface ScriptType {
+    args: string;
+    codeHash: string;
+    hashType: string;
+}
 
 export interface DataRow {
     quantity: number;
     address: string;
-    type?: TokenType;
+    type?: ScriptType;
     data?: number;
 }
 

@@ -1,8 +1,8 @@
 import { Script, utils } from "@ckb-lumos/lumos";
 import { TransactionSkeleton } from "@ckb-lumos/helpers";
 import { sudt, common } from "@ckb-lumos/common-scripts";
-import { ConnectionService } from "./connection.service";
-import { TransactionService } from "./transaction.service";
+import { ConnectionService } from "../connection.service";
+import { TransactionService } from "../transaction.service";
 
 export interface TokenType {
     args: string;

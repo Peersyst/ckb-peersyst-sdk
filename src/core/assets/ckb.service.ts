@@ -1,7 +1,7 @@
 import { TransactionSkeleton } from "@ckb-lumos/helpers";
 import { common } from "@ckb-lumos/common-scripts";
-import { ConnectionService } from "./connection.service";
-import { TransactionService } from "./transaction.service";
+import { ConnectionService } from "../connection.service";
+import { TransactionService } from "../transaction.service";
 
 export interface CKBBalance {
     totalBalance: bigint;

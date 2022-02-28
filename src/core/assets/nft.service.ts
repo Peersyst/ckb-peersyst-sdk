@@ -1,6 +1,6 @@
 import { Cell } from "@ckb-lumos/lumos";
 import * as NrcSdk from "@rather-labs/nrc-721-sdk";
-import { ConnectionService } from "./connection.service";
+import { ConnectionService } from "../connection.service";
 import { NftScript, NftSdk } from "./nft.types";
 
 export interface Nft {
