@@ -79,7 +79,11 @@ export class TransactionService {
                 }));
                 cell.transaction.outputs_data.map((data, index) => {
                     if (data !== "0x") {
-                        outputs[index].data = Number(utils.readBigUInt128LE(data));
+                        if (data.length === 34) {
+                            outputs[index].data = Number(utils.readBigUInt128LE(data));
+                        } else if (data.length === 18) {
+                            outputs[index].data = Number(utils.readBigUInt64LE(data));
+                        }
                     }
                 });
 

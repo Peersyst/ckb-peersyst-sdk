@@ -2,7 +2,8 @@ import { ConnectionService, Environments, WalletService, Logger } from "../src";
 
 const ckbUrl = "http://78.46.174.87:8114/rpc";
 const indexerUrl = "http://78.46.174.87:8114/indexer";
-const mnemonic = "teach act exotic into script once dutch choice menu elite apple faith";
+// const mnemonic2 = "teach act exotic into script once dutch choice menu elite apple faith";
+const mnemonic = "private pond zero popular fashion omit february obscure pattern city camp pistol";
 
 const main = async () => {
     try {
@@ -15,6 +16,7 @@ const main = async () => {
         Logger.info(transactions);
     } catch (error) {
         Logger.error(`${error.name}: ${error.message}`);
+        Logger.error(`${error.stack}`);
     }
 };
 
