@@ -16,7 +16,7 @@ export class Logger {
     }
 
     static debug(message: any, name = ""): void {
-        console.debug(`${name} >> `, message);
+        console.debug(`${name}[debug] >> `, message);
     }
 
     debug(message: any): void {
@@ -26,7 +26,7 @@ export class Logger {
     }
 
     static info(message: any, name = ""): void {
-        console.info(`${name} >> `, message);
+        console.info(`${name}[info] >> `, message);
     }
 
     info(message: any): void {
@@ -36,7 +36,7 @@ export class Logger {
     }
 
     static log(message: any, name = ""): void {
-        console.log(`${name} >> `, message);
+        console.log(`${name}[log] >> `, message);
     }
 
     log(message: any): void {
@@ -46,7 +46,7 @@ export class Logger {
     }
 
     static warn(message: any, name = ""): void {
-        console.warn(`${name} >> `, message);
+        console.warn(`${name}[warn] >> `, message);
     }
 
     warn(message: any): void {
@@ -56,7 +56,7 @@ export class Logger {
     }
 
     static error(message: any, name = ""): void {
-        console.error(`${name} >> `, message);
+        console.error(`${name}[error] >> `, message);
     }
 
     error(message: any): void {
