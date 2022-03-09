@@ -24,7 +24,7 @@ export class CKBService {
             throw new Error("Minimum transfer (cell) value is 61 CKB");
         }
 
-        let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getIndexer() });
+        let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getEmptyCellProvider() });
         txSkeleton = await common.transfer(txSkeleton, [from], to, amount, null, null, this.connection.getConfigAsObject());
         txSkeleton = await common.payFee(txSkeleton, [from], this.transactionService.defaultFee, null, this.connection.getConfigAsObject());
 

@@ -1,5 +1,15 @@
 import { RPC, config, Script, helpers, OutPoint, Indexer } from "@ckb-lumos/lumos";
-import { TransactionWithStatus, Header, ChainInfo, CellWithStatus, Indexer as IndexerType } from "@ckb-lumos/base";
+import {
+    TransactionWithStatus,
+    Header,
+    ChainInfo,
+    CellWithStatus,
+    Indexer as IndexerType,
+    CellProvider,
+    CellCollector,
+    QueryOptions,
+} from "@ckb-lumos/base";
+import { Config } from "@ckb-lumos/config-manager";
 
 // AGGRON4 for test, LINA for main
 const { AGGRON4, LINA } = config.predefined;
@@ -11,13 +21,25 @@ export enum Environments {
 
 export type configType = typeof AGGRON4 | typeof LINA;
 
+class CustomCellProvider implements CellProvider {
+    public readonly uri: string;
+
+    constructor(private readonly indexer: IndexerType, private readonly myQueryOptions: QueryOptions) {
+        this.uri = indexer.uri;
+    }
+
+    collector(queryOptions: QueryOptions): CellCollector {
+        return this.indexer.collector({ ...queryOptions, ...this.myQueryOptions });
+    }
+}
+
 export class ConnectionService {
     private readonly ckbUrl: string;
     private readonly indexerUrl: string;
     private readonly env: Environments;
     private readonly rpc: RPC;
     private readonly indexer: IndexerType;
-    private readonly config: configType;
+    private readonly config: Config;
     private blockHeaderNumberMap = new Map<string, Header>();
     private blockHeaderHashMap = new Map<string, Header>();
     private transactionMap = new Map<string, TransactionWithStatus>();
@@ -75,7 +97,7 @@ export class ConnectionService {
         return this.transactionMap.get(transactionHash);
     }
 
-    getConfig(): configType {
+    getConfig(): Config {
         return this.config;
     }
 
@@ -89,6 +111,14 @@ export class ConnectionService {
 
     getIndexer(): IndexerType {
         return this.indexer;
+    }
+
+    getCellProvider(queryOptions: QueryOptions = {}): CellProvider {
+        return new CustomCellProvider(this.indexer, queryOptions);
+    }
+
+    getEmptyCellProvider(queryOptions: QueryOptions = {}): CellProvider {
+        return this.getCellProvider({ ...queryOptions, type: "empty" });
     }
 
     getCKBUrl(): string {

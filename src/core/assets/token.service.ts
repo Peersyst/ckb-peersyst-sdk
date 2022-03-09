@@ -25,7 +25,7 @@ export class TokenService {
     }
 
     async issue(address: string, amount: number, privateKey: string): Promise<string> {
-        let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getIndexer() });
+        let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getEmptyCellProvider() });
         txSkeleton = await sudt.issueToken(txSkeleton, address, amount, undefined, undefined, this.connection.getConfigAsObject());
         txSkeleton = await common.payFee(
             txSkeleton,
@@ -39,7 +39,7 @@ export class TokenService {
     }
 
     async transfer(from: string, to: string, token: string, amount: number, privateKey: string): Promise<string> {
-        let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getIndexer() });
+        let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getCellProvider() });
         txSkeleton = await sudt.transfer(txSkeleton, [from], token, to, amount, undefined, undefined, undefined, {
             config: this.connection.getConfig(),
         });
