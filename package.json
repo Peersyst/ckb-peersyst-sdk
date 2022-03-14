@@ -1,5 +1,5 @@
 {
-    "name": "ckb-peersyst-sdk",
+    "name": "@peersyst/ckb-peersyst-sdk",
     "version": "1.0.0",
     "description": "Nervos CKB peersyst SDK for wallet",
     "main": "index.js",
