@@ -13,10 +13,14 @@
         "test": "jest --passWithNoTests --detectOpenHandles",
         "test:coverage": "jest --coverage --passWithNoTests"
     },
+    "private": true,
     "files": [
-        "dist/index.js",
-        "dist/index.d.ts"
+        "dist"
     ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/Peersyst/ckb-peersyst-sdk"
+    },
     "jest": {
         "moduleFileExtensions": [
             "js",
@@ -49,6 +53,7 @@
         "rimraf": "^3.0.2"
     },
     "devDependencies": {
+        "@types/node": "^17.0.21",
         "@typescript-eslint/eslint-plugin": "^5.11.0",
         "@typescript-eslint/parser": "^5.11.0",
         "eslint": "^8.8.0",
