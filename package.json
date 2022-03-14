@@ -5,7 +5,7 @@
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
     "scripts": {
-        "build": "tsc -p .",
+        "build": "tsc",
         "prepare": "npm run build",
         "start": "ts-node src/index.ts",
         "example": "ts-node examples/$npm_config_name.ts",
@@ -13,6 +13,10 @@
         "test": "jest --passWithNoTests --detectOpenHandles",
         "test:coverage": "jest --coverage --passWithNoTests"
     },
+    "files": [
+        "dist/index.js",
+        "dist/index.d.ts"
+    ],
     "jest": {
         "moduleFileExtensions": [
             "js",
