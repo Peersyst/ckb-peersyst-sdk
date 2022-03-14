@@ -19,8 +19,6 @@ export enum Environments {
     Testnet = "testnet",
 }
 
-export type configType = typeof AGGRON4 | typeof LINA;
-
 class CustomCellProvider implements CellProvider {
     public readonly uri: string;
 
