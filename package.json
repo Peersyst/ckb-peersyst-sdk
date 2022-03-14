@@ -4,9 +4,6 @@
     "description": "Nervos CKB peersyst SDK for wallet",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
-    "files": [
-        "dist/**/*"
-    ],
     "scripts": {
         "build": "tsc -p .",
         "prepare": "npm run build",
