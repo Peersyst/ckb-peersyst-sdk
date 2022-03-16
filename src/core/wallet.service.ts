@@ -4,7 +4,7 @@ import { TransactionService, Transaction, TransactionStatus } from "./transactio
 import { TokenService, TokenAmount } from "./assets/token.service";
 import { CKBBalance, CKBService } from "./assets/ckb.service";
 import { DAOBalance, DAOService, DAOStatistics, DAOUnlockableAmount } from "./dao/dao.service";
-import { Cell } from "@ckb-lumos/lumos";
+import { Cell, Script } from "@ckb-lumos/lumos";
 import { TransactionWithStatus } from "@ckb-lumos/base";
 import { Nft, NftService } from "./assets/nft.service";
 import { Logger } from "../utils/logger";
@@ -51,7 +51,7 @@ export class WalletService {
         return mnemonic.generateMnemonic();
     }
 
-    static getPrivateKeyFromMnemonic(mnemo: string): ExtendedPrivateKey {
+    private static getPrivateKeyFromMnemonic(mnemo: string): ExtendedPrivateKey {
         const seed = mnemonic.mnemonicToSeedSync(mnemo);
         return ExtendedPrivateKey.fromSeed(seed);
     }
@@ -59,17 +59,45 @@ export class WalletService {
     // ----------------------
     // -- Wallet functions --
     // ----------------------
+    async getAccountIndexes(): Promise<number[]> {
+        const cellProvider = this.connection.getCellProvider();
+        const accounts = [];
+        let found = true;
+        let index = 0;
+
+        while (found) {
+            found = false;
+            const lock = this.getLock(index);
+            const collector = cellProvider.collector({ lock });
+
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            for await (const cell of collector.collect()) {
+                found = true;
+                accounts.push(index);
+                break;
+            }
+
+            index += 1;
+        }
+
+        return accounts;
+    }
+
+    getLock(accountId = 0, script: AddressScriptType = AddressScriptType.SECP256K1_BLAKE160): Script {
+        const template = this.connection.getConfig().SCRIPTS[script];
+        const lockScript = {
+            code_hash: template.CODE_HASH,
+            hash_type: template.HASH_TYPE,
+            args: this.accountPublicKey.publicKeyInfo(this.addressType, accountId).blake160,
+        };
+
+        return lockScript;
+    }
+
     getAddress(accountId = 0, script: AddressScriptType = AddressScriptType.SECP256K1_BLAKE160): string {
         const key = `${accountId}-${script}`;
         if (!this.addressMap.has(key)) {
-            const template = this.connection.getConfig().SCRIPTS[script];
-            const lockScript = {
-                code_hash: template.CODE_HASH,
-                hash_type: template.HASH_TYPE,
-                args: this.accountPublicKey.publicKeyInfo(this.addressType, accountId).blake160,
-            };
-
-            const address = this.connection.getAddressFromLock(lockScript);
+            const address = this.connection.getAddressFromLock(this.getLock(accountId, script));
             this.addressMap.set(key, address);
         }
 

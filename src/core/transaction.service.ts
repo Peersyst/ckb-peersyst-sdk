@@ -18,7 +18,7 @@ export interface DataRow {
 }
 
 export interface Transaction {
-    status: string;
+    status: TransactionStatus;
     transactionHash: string;
     inputs: DataRow[];
     outputs: DataRow[];
@@ -88,7 +88,7 @@ export class TransactionService {
                 });
 
                 this.transactionMap.set(cell.transaction.hash, {
-                    status: cell.tx_status.status,
+                    status: cell.tx_status.status as TransactionStatus,
                     transactionHash: cell.transaction.hash,
                     inputs,
                     outputs,
