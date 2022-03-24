@@ -12,8 +12,12 @@ const main = async () => {
         const wallet = new WalletService(connectionService, mnemonic);
 
         await wallet.refreshCellsAndTransactions();
-        const accounts = await wallet.getAccountIndexes();
+        const accounts = wallet.getAccountIndexes();
         Logger.info(accounts);
+        const addresses = wallet.getAllAddresses();
+        Logger.info(addresses);
+        const newAddress = wallet.getNewAddress();
+        Logger.info(newAddress);
     } catch (error) {
         Logger.error(`${error.name}: ${error.message}`);
     }

@@ -14,6 +14,7 @@ export class CKBService {
     private readonly connection: ConnectionService;
     private readonly transactionService: TransactionService;
     private readonly transferCellSize = BigInt(61 * 10 ** 8);
+    private readonly transferData = "0x";
 
     constructor(connectionService: ConnectionService, transactionService: TransactionService) {
         this.connection = connectionService;
@@ -30,6 +31,46 @@ export class CKBService {
         txSkeleton = await common.payFee(txSkeleton, [from], this.transactionService.defaultFee, null, this.connection.getConfigAsObject());
 
         return this.transactionService.signTransaction(txSkeleton, [privateKey]);
+    }
+
+    async transferFromCells(cells: Cell[], fromAddresses: string[], to: string, amount: bigint, privateKeys: string[]): Promise<string> {
+        if (amount < this.transferCellSize) {
+            throw new Error("Minimum transfer (cell) value is 61 CKB");
+        }
+
+        let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getEmptyCellProvider() });
+
+        // Add output
+        const toScript = this.connection.getLockFromAddress(to);
+        txSkeleton = txSkeleton.update("outputs", (outputs) => {
+            return outputs.push({
+                cell_output: {
+                    capacity: "0x" + amount.toString(16),
+                    lock: toScript,
+                },
+                data: this.transferData,
+            });
+        });
+
+        txSkeleton = this.transactionService.addSecp256CellDep(txSkeleton);
+        // Inject capacity
+        const capacityResp = this.transactionService.injectCapacity(txSkeleton, amount, cells);
+        txSkeleton = capacityResp.txSkeleton;
+
+        txSkeleton = await common.payFee(
+            txSkeleton,
+            fromAddresses,
+            this.transactionService.defaultFee,
+            null,
+            this.connection.getConfigAsObject(),
+        );
+
+        const signingPrivKeys: string[] = [];
+        for (const addressToSign of capacityResp.addressesToSign) {
+            signingPrivKeys.push(privateKeys[fromAddresses.indexOf(addressToSign)]);
+        }
+
+        return this.transactionService.signTransaction(txSkeleton, signingPrivKeys);
     }
 
     async getBalance(address: string): Promise<CKBBalance> {

@@ -11,11 +11,9 @@ const main = async () => {
         // Wallet instance is necessary for all wallet functions
         const wallet = new WalletService(connectionService, mnemonic);
 
-        // const amount = BigInt(500 * 10 ** 8);
-        // const txHash = await wallet.depositInDAO(amount, mnemonic);
-        // Logger.info(txHash);
-        const txHash2 = await wallet.depositInDAOCells(BigInt(2000 * 10 ** 8), mnemonic);
-        Logger.info(txHash2);
+        const amount = BigInt(500 * 10 ** 8);
+        const txHash = await wallet.depositInDAO(amount, mnemonic);
+        Logger.info(txHash);
 
         // You can view DAO balance with
         const daoBalance = await wallet.getDAOBalance();

@@ -125,7 +125,7 @@ export class WalletService {
         return this.getAddress(this.firstIndexWithoutTxs - 1);
     }
 
-    async getAccountIndexes(): Promise<number[]> {
+    getAccountIndexes(): number[] {
         return [...Array(this.firstIndexWithoutTxs).keys()];
     }
 
@@ -229,10 +229,19 @@ export class WalletService {
     // ---------------------------
     // -- CKB service functions --
     // ---------------------------
-    async sendTransaction(amount: bigint, mnemo: string, to: string, accountId = 0): Promise<string> {
+    async sendTransactionSingleAccount(amount: bigint, mnemo: string, to: string, accountId = 0): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
+        await this.refreshCellsAndTransactions();
 
         return this.ckbService.transfer(address, to, BigInt(amount), privateKey);
+    }
+
+    async sendTransaction(amount: bigint, mnemo: string, to: string): Promise<string> {
+        await this.refreshCellsAndTransactions();
+        const addresses = this.getAllAddresses();
+        const privateKeys = this.getAllPrivateKeys(mnemo);
+
+        return this.ckbService.transferFromCells(this.getCells(), addresses, to, BigInt(amount), privateKeys);
     }
 
     async getCKBBalanceFromAccount(accountId = 0): Promise<CKBBalance> {
@@ -284,21 +293,19 @@ export class WalletService {
     }
 
     // ---------------------------
-    // -- DAO Service functions --
+    // -- DAO service functions --
     // ---------------------------
-    async depositInDAO(amount: bigint, mnemo: string, accountId = 0): Promise<string> {
-        await this.refreshCellsAndTransactions();
+    async depositInDAOSingleAccount(amount: bigint, mnemo: string, accountId = 0): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
-        return this.daoService.deposit(amount, address, this.getNewAddress(), privateKey);
+        return this.daoService.deposit(amount, address, address, privateKey);
     }
 
-    async depositInDAOCells(amount: bigint, mnemo: string): Promise<string> {
+    async depositInDAO(amount: bigint, mnemo: string): Promise<string> {
         await this.refreshCellsAndTransactions();
-        this.logger.info("refreshCellsAndTransactions done");
         const addresses = this.getAllAddresses();
         const privateKeys = this.getAllPrivateKeys(mnemo);
 
-        return this.daoService.depositFromCells(amount, this.getCells(), addresses, this.getNewAddress(), privateKeys);
+        return this.daoService.depositMultiAccount(amount, this.getCells(), addresses, this.getNewAddress(), privateKeys);
     }
 
     async withdrawAndUnlockFromCell(cell: Cell, mnemo: string): Promise<string> {

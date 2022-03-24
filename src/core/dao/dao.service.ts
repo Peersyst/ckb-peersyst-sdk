@@ -191,7 +191,7 @@ export class DAOService {
         return this.transactionService.signTransaction(txSkeleton, [privateKey]);
     }
 
-    async depositFromCells(amount: bigint, cells: Cell[], fromAddresses: string[], to: string, privateKeys: string[]): Promise<string> {
+    async depositMultiAccount(amount: bigint, cells: Cell[], fromAddresses: string[], to: string, privateKeys: string[]): Promise<string> {
         if (amount < this.daoCellSize) {
             throw new Error("Minimum deposit value is 102 CKB");
         }
@@ -209,8 +209,6 @@ export class DAOService {
                     type: this.getDAOScript(),
                 },
                 data: this.depositDaoData,
-                out_point: undefined,
-                block_hash: undefined,
             });
         });
         const outputIndex = txSkeleton.get("outputs").size - 1;
