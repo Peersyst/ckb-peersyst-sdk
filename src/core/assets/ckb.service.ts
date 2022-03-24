@@ -2,6 +2,7 @@ import { TransactionSkeleton } from "@ckb-lumos/helpers";
 import { common } from "@ckb-lumos/common-scripts";
 import { ConnectionService } from "../connection.service";
 import { TransactionService } from "../transaction.service";
+import { Cell } from "@ckb-lumos/lumos";
 
 export interface CKBBalance {
     totalBalance: bigint;
@@ -28,7 +29,7 @@ export class CKBService {
         txSkeleton = await common.transfer(txSkeleton, [from], to, amount, null, null, this.connection.getConfigAsObject());
         txSkeleton = await common.payFee(txSkeleton, [from], this.transactionService.defaultFee, null, this.connection.getConfigAsObject());
 
-        return this.transactionService.signTransaction(txSkeleton, privateKey);
+        return this.transactionService.signTransaction(txSkeleton, [privateKey]);
     }
 
     async getBalance(address: string): Promise<CKBBalance> {
@@ -36,9 +37,19 @@ export class CKBService {
             lock: this.connection.getLockFromAddress(address),
         });
 
+        const cells: Cell[] = [];
+        for await (const cell of collector.collect()) {
+            cells.push(cell);
+        }
+
+        return this.getBalanceFromCells(cells);
+    }
+
+    getBalanceFromCells(cells: Cell[]): CKBBalance {
         let totalBalance = BigInt(0);
         let occupiedBalance = BigInt(0);
-        for await (const cell of collector.collect()) {
+
+        for (const cell of cells) {
             totalBalance += BigInt(cell.cell_output.capacity);
             if (cell.cell_output.type) {
                 occupiedBalance += BigInt(cell.cell_output.capacity);

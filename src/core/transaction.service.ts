@@ -1,8 +1,14 @@
-import { commons, hd, utils } from "@ckb-lumos/lumos";
+import { ScriptConfig } from "@ckb-lumos/config-manager";
+import { Cell, commons, hd, Script, utils } from "@ckb-lumos/lumos";
 import { sealTransaction, TransactionSkeletonType } from "@ckb-lumos/helpers";
-import { TransactionWithStatus } from "@ckb-lumos/base";
+import { TransactionWithStatus, values, core, WitnessArgs } from "@ckb-lumos/base";
 import { TransactionCollector as TxCollector } from "@ckb-lumos/ckb-indexer";
+import { Reader, normalizers } from "@ckb-lumos/toolkit";
+import { CKBIndexerQueryOptions } from "@ckb-lumos/ckb-indexer/src/type";
 import { ConnectionService } from "./connection.service";
+import { Logger } from "../utils/logger";
+
+const { ScriptValue } = values;
 
 export interface ScriptType {
     args: string;
@@ -37,7 +43,10 @@ export enum TransactionStatus {
 export class TransactionService {
     private readonly connection: ConnectionService;
     private readonly TransactionCollector: any;
+    private readonly logger = new Logger(TransactionService.name);
     private readonly transactionMap = new Map<string, Transaction>();
+    private readonly secpSignaturePlaceholder =
+        "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
     public readonly defaultFee = BigInt(100000);
 
     constructor(connectionService: ConnectionService) {
@@ -45,10 +54,145 @@ export class TransactionService {
         this.TransactionCollector = TxCollector;
     }
 
-    async getTransactions(address: string): Promise<Transaction[]> {
+    static addCellDep(txSkeleton: TransactionSkeletonType, scriptConfig: ScriptConfig): TransactionSkeletonType {
+        return txSkeleton.update("cellDeps", (cellDeps) => {
+            return cellDeps.push({
+                out_point: {
+                    tx_hash: scriptConfig.TX_HASH,
+                    index: scriptConfig.INDEX,
+                },
+                dep_type: scriptConfig.DEP_TYPE,
+            });
+        });
+    }
+
+    addSecp256CellDep(txSkeleton: TransactionSkeletonType): TransactionSkeletonType {
+        return TransactionService.addCellDep(txSkeleton, this.connection.getConfig().SCRIPTS.SECP256K1_BLAKE160);
+    }
+
+    injectCapacity(
+        txSkeleton: TransactionSkeletonType,
+        capacity: bigint,
+        cells: Cell[],
+    ): { txSkeleton: TransactionSkeletonType; addressesToSign: string[] } {
+        let lastScript: Script;
+        let changeCell: Cell;
+        let changeCapacity = BigInt(0);
+        let currentAmount = capacity;
+        const addressesToSign: string[] = [];
+
+        for (const cell of cells) {
+            // Cell is empty
+            if (!cell.cell_output.type) {
+                txSkeleton = txSkeleton.update("inputs", (inputs) => inputs.push(cell));
+                txSkeleton = txSkeleton.update("witnesses", (witnesses) => witnesses.push("0x"));
+
+                const inputCapacity = BigInt(cell.cell_output.capacity);
+                let deductCapacity = inputCapacity;
+                if (deductCapacity > currentAmount) {
+                    deductCapacity = currentAmount;
+                }
+                currentAmount -= deductCapacity;
+                changeCapacity = changeCapacity + inputCapacity - deductCapacity;
+
+                const lockScript = cell.cell_output.lock;
+                if (
+                    !lastScript ||
+                    lastScript.args !== lockScript.args ||
+                    lastScript.code_hash !== lockScript.code_hash ||
+                    lastScript.hash_type !== lockScript.hash_type
+                ) {
+                    txSkeleton = this.addWitnesses(txSkeleton, lockScript);
+                    addressesToSign.push(this.connection.getAddressFromLock(lockScript));
+                    lastScript = lockScript;
+                }
+
+                // Got enough amount
+                if (currentAmount === BigInt(0) && changeCapacity > BigInt(0)) {
+                    changeCell = {
+                        cell_output: {
+                            capacity: "0x" + changeCapacity.toString(16),
+                            lock: cell.cell_output.lock,
+                            type: undefined,
+                        },
+                        data: "0x",
+                        out_point: undefined,
+                        block_hash: undefined,
+                    };
+                    break;
+                }
+            }
+        }
+
+        if (changeCapacity > BigInt(0)) {
+            txSkeleton = txSkeleton.update("outputs", (outputs) => outputs.push(changeCell));
+        }
+
+        return { txSkeleton, addressesToSign };
+    }
+
+    addWitnesses(txSkeleton: TransactionSkeletonType, fromScript: Script): TransactionSkeletonType {
+        // posar el index i from script
+        const firstIndex = txSkeleton
+            .get("inputs")
+            .findIndex((input) =>
+                new ScriptValue(input.cell_output.lock, { validate: false }).equals(new ScriptValue(fromScript, { validate: false })),
+            );
+
+        if (firstIndex !== -1) {
+            while (firstIndex >= txSkeleton.get("witnesses").size) {
+                txSkeleton = txSkeleton.update("witnesses", (witnesses) => witnesses.push("0x"));
+            }
+
+            let witness: string = txSkeleton.get("witnesses").get(firstIndex);
+            const newWitnessArgs: WitnessArgs = { lock: this.secpSignaturePlaceholder };
+            if (witness !== "0x") {
+                const witnessArgs = new core.WitnessArgs(new Reader(witness));
+                const lock = witnessArgs.getLock();
+                if (lock.hasValue() && new Reader(lock.value().raw()).serializeJson() !== newWitnessArgs.lock) {
+                    throw new Error("Lock field in first witness is set aside for signature!");
+                }
+
+                const inputType = witnessArgs.getInputType();
+                if (inputType.hasValue()) {
+                    newWitnessArgs.input_type = new Reader(inputType.value().raw()).serializeJson();
+                }
+                const outputType = witnessArgs.getOutputType();
+                if (outputType.hasValue()) {
+                    newWitnessArgs.output_type = new Reader(outputType.value().raw()).serializeJson();
+                }
+            }
+            witness = new Reader(core.SerializeWitnessArgs(normalizers.NormalizeWitnessArgs(newWitnessArgs))).serializeJson();
+            txSkeleton = txSkeleton.update("witnesses", (witnesses) => witnesses.set(firstIndex, witness));
+        }
+
+        return txSkeleton;
+    }
+
+    async lockScriptHasTransactions(lockScript: Script): Promise<boolean> {
         const transactionCollector = new this.TransactionCollector(
             this.connection.getIndexer(),
-            { lock: this.connection.getLockFromAddress(address) },
+            { lock: lockScript },
+            this.connection.getCKBUrl(),
+            { includeStatus: false },
+        );
+
+        const txs = await transactionCollector.count();
+        return txs > 0;
+    }
+
+    async getTransactions(address: string, toBlock?: string, fromBlock?: string): Promise<Transaction[]> {
+        const queryOptions: CKBIndexerQueryOptions = { lock: this.connection.getLockFromAddress(address) };
+        if (toBlock) {
+            queryOptions.toBlock = toBlock;
+        }
+        if (fromBlock) {
+            queryOptions.fromBlock = fromBlock;
+        }
+
+        const transactionCollector = new this.TransactionCollector(
+            this.connection.getIndexer(),
+            queryOptions,
             this.connection.getCKBUrl(),
             { includeStatus: true },
         );
@@ -107,11 +251,23 @@ export class TransactionService {
         return transactions;
     }
 
-    async signTransaction(txSkeleton: TransactionSkeletonType, privateKey: string): Promise<string> {
+    async signTransaction(txSkeleton: TransactionSkeletonType, privateKeys: string[]): Promise<string> {
         const txSkeletonWEntries = commons.common.prepareSigningEntries(txSkeleton, this.connection.getConfigAsObject());
-        const message = txSkeletonWEntries.get("signingEntries").get(0)?.message;
-        const Sig = hd.key.signRecoverable(message, privateKey);
-        const tx = sealTransaction(txSkeletonWEntries, [Sig]);
+        this.logger.info(privateKeys);
+        this.logger.info(privateKeys.length);
+        this.logger.info(txSkeletonWEntries.get("signingEntries").count());
+        if (privateKeys.length !== txSkeletonWEntries.get("signingEntries").count()) {
+            this.logger.error("Invalid private keys length");
+            throw new Error("Invalid private keys length");
+        }
+
+        const signatures = [];
+        for (let i = 0; i < privateKeys.length; i += 1) {
+            const entry = txSkeletonWEntries.get("signingEntries").get(i);
+            signatures.push(hd.key.signRecoverable(entry.message, privateKeys[i]));
+        }
+        const tx = sealTransaction(txSkeletonWEntries, signatures);
+        this.logger.info(JSON.stringify(tx, null, 2));
         const hash = await this.connection.getRPC().send_transaction(tx, "passthrough");
 
         return hash;

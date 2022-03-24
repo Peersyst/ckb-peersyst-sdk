@@ -41,6 +41,32 @@ export class NftService {
         };
     }
 
+    private async getNftFromCell(cell: Cell): Promise<Nft | null> {
+        const cellTypeScript = this.cellToNftScript(cell);
+
+        let isNftCell: boolean;
+        try {
+            isNftCell = await this.nftSdk.nftCell.isCellNRC721(cellTypeScript);
+        } catch (error) {
+            isNftCell = false;
+        }
+
+        if (cellTypeScript && isNftCell) {
+            const nft = await this.nftSdk.nftCell.read(cellTypeScript);
+
+            return {
+                tokenId: nft.tokenId,
+                tokenUri: nft.tokenUri,
+                data: JSON.parse(nft.data),
+                nftName: nft.factoryData.name,
+                nftSymbol: nft.factoryData.symbol,
+                nftExtraData: nft.factoryData.extraData,
+            };
+        }
+
+        return null;
+    }
+
     async getBalance(address: string): Promise<Nft[]> {
         await this.initialize();
 
@@ -50,26 +76,23 @@ export class NftService {
 
         const nfts: Nft[] = [];
         for await (const cell of collector.collect()) {
-            const cellTypeScript = this.cellToNftScript(cell);
-
-            let isNftCell: boolean;
-            try {
-                isNftCell = await this.nftSdk.nftCell.isCellNRC721(cellTypeScript);
-            } catch (error) {
-                isNftCell = false;
+            const nft = await this.getNftFromCell(cell);
+            if (nft) {
+                nfts.push(nft);
             }
+        }
 
-            if (cellTypeScript && isNftCell) {
-                const nft = await this.nftSdk.nftCell.read(cellTypeScript);
+        return nfts;
+    }
 
-                nfts.push({
-                    tokenId: nft.tokenId,
-                    tokenUri: nft.tokenUri,
-                    data: JSON.parse(nft.data),
-                    nftName: nft.factoryData.name,
-                    nftSymbol: nft.factoryData.symbol,
-                    nftExtraData: nft.factoryData.extraData,
-                });
+    async getBalanceFromCells(cells: Cell[]): Promise<Nft[]> {
+        await this.initialize();
+
+        const nfts: Nft[] = [];
+        for await (const cell of cells) {
+            const nft = await this.getNftFromCell(cell);
+            if (nft) {
+                nfts.push(nft);
             }
         }
 

@@ -1,4 +1,4 @@
-import { Script, utils } from "@ckb-lumos/lumos";
+import { Cell, Script, utils } from "@ckb-lumos/lumos";
 import { TransactionSkeleton } from "@ckb-lumos/helpers";
 import { sudt, common } from "@ckb-lumos/common-scripts";
 import { ConnectionService } from "../connection.service";
@@ -35,7 +35,7 @@ export class TokenService {
             this.connection.getConfigAsObject(),
         );
 
-        return this.transactionService.signTransaction(txSkeleton, privateKey);
+        return this.transactionService.signTransaction(txSkeleton, [privateKey]);
     }
 
     async transfer(from: string, to: string, token: string, amount: number, privateKey: string): Promise<string> {
@@ -45,7 +45,7 @@ export class TokenService {
         });
         txSkeleton = await common.payFee(txSkeleton, [from], this.transactionService.defaultFee, null, this.connection.getConfigAsObject());
 
-        return this.transactionService.signTransaction(txSkeleton, privateKey);
+        return this.transactionService.signTransaction(txSkeleton, [privateKey]);
     }
 
     async getBalance(address: string): Promise<TokenAmount[]> {
@@ -53,8 +53,17 @@ export class TokenService {
             lock: this.connection.getLockFromAddress(address),
         });
 
-        const tokenMap = new Map<string, number>();
+        const cells: Cell[] = [];
         for await (const cell of collector.collect()) {
+            cells.push(cell);
+        }
+
+        return this.getBalanceFromCells(cells);
+    }
+
+    async getBalanceFromCells(cells: Cell[]): Promise<TokenAmount[]> {
+        const tokenMap = new Map<string, number>();
+        for await (const cell of cells) {
             if (this.isTokenScriptType(cell.cell_output.type)) {
                 const key = cell.cell_output.type.args;
 

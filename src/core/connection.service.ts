@@ -128,6 +128,7 @@ export class ConnectionService {
     }
 
     getAddressFromLock(lock: Script): string {
+        // return helpers.generateAddress(lock, { config: this.config });
         return helpers.encodeToAddress(lock, { config: this.config });
     }
 
