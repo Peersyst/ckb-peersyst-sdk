@@ -7,6 +7,7 @@ import { Reader, normalizers } from "@ckb-lumos/toolkit";
 import { CKBIndexerQueryOptions } from "@ckb-lumos/ckb-indexer/src/type";
 import { ConnectionService } from "./connection.service";
 import { Logger } from "../utils/logger";
+import { NftService } from "./assets/nft.service";
 
 const { ScriptValue } = values;
 
@@ -28,6 +29,8 @@ export interface Transaction {
     transactionHash: string;
     inputs: DataRow[];
     outputs: DataRow[];
+    type: TransactionType;
+    amount: number;
     blockHash: string;
     blockNumber: number;
     timestamp: Date;
@@ -40,6 +43,19 @@ export enum TransactionStatus {
     REJECTED = "rejected",
 }
 
+export enum TransactionType {
+    SEND_CKB = "send_ckb",
+    RECEIVE_CKB = "receive_ckb",
+    SEND_TOKEN = "send_token",
+    RECEIVE_TOKEN = "receive_token",
+    SEND_NFT = "send_nft",
+    RECEIVE_NFT = "receive_nft",
+    DEPOSIT_DAO = "deposit_dao",
+    WITHDRAW_DAO = "withdraw_dao",
+    UNLOCK_DAO = "unlock_dao",
+    SMART_CONTRACT = "smart_contract",
+}
+
 export enum FeeRate {
     SLOW = 1000,
     NORMAL = 100000,
@@ -48,6 +64,7 @@ export enum FeeRate {
 
 export class TransactionService {
     private readonly connection: ConnectionService;
+    private readonly nftService: NftService;
     private readonly TransactionCollector: any;
     private readonly logger = new Logger(TransactionService.name);
     private readonly transactionMap = new Map<string, Transaction>();
@@ -58,6 +75,7 @@ export class TransactionService {
     constructor(connectionService: ConnectionService) {
         this.connection = connectionService;
         this.TransactionCollector = TxCollector;
+        this.nftService = new NftService(this.connection);
     }
 
     static addCellDep(txSkeleton: TransactionSkeletonType, scriptConfig: ScriptConfig): TransactionSkeletonType {
@@ -70,6 +88,10 @@ export class TransactionService {
                 dep_type: scriptConfig.DEP_TYPE,
             });
         });
+    }
+
+    static isScriptTypeScript(scriptType: ScriptType, scriptConfig: ScriptConfig): boolean {
+        return scriptConfig.CODE_HASH === scriptType.codeHash && scriptConfig.HASH_TYPE === scriptType.hashType;
     }
 
     addSecp256CellDep(txSkeleton: TransactionSkeletonType): TransactionSkeletonType {
@@ -219,6 +241,7 @@ export class TransactionService {
         for await (cell of transactionCollector.collect()) {
             if (!this.transactionMap.has(cell.transaction.hash)) {
                 const header = await this.connection.getBlockHeaderFromHash(cell.tx_status.block_hash);
+                let hasDAOInput = false;
 
                 const inputs: DataRow[] = [];
                 for (let i = 0; i < cell.transaction.inputs.length; i += 1) {
@@ -229,6 +252,16 @@ export class TransactionService {
                         quantity: parseInt(output.capacity, 16) / 100000000,
                         address: this.connection.getAddressFromLock(output.lock),
                     });
+                    if (output.type) {
+                        const script: ScriptType = {
+                            codeHash: output.type.code_hash,
+                            hashType: output.type.hash_type,
+                            args: output.type.args,
+                        };
+                        if (TransactionService.isScriptTypeScript(script, this.connection.getConfig().SCRIPTS.DAO)) {
+                            hasDAOInput = true;
+                        }
+                    }
                 }
 
                 const outputs: DataRow[] = cell.transaction.outputs.map((output) => ({
@@ -248,6 +281,29 @@ export class TransactionService {
                     }
                 });
 
+                let amount = 0;
+                let type: TransactionType;
+                if (outputs[0] && cell.transaction.outputs[0]) {
+                    amount = outputs[0].quantity;
+                    const isReceive = outputs[0].address === address;
+
+                    if (!outputs[0].type) {
+                        if (hasDAOInput) {
+                            type = TransactionType.UNLOCK_DAO;
+                        } else {
+                            type = !isReceive ? TransactionType.SEND_CKB : TransactionType.RECEIVE_CKB;
+                        }
+                    } else if (TransactionService.isScriptTypeScript(outputs[0].type, this.connection.getConfig().SCRIPTS.SUDT)) {
+                        type = !isReceive ? TransactionType.SEND_TOKEN : TransactionType.RECEIVE_TOKEN;
+                    } else if (TransactionService.isScriptTypeScript(outputs[0].type, this.connection.getConfig().SCRIPTS.DAO)) {
+                        type = outputs[0].data === 0 ? TransactionType.DEPOSIT_DAO : TransactionType.WITHDRAW_DAO;
+                    } else if (await this.nftService.isScriptNftScript(outputs[0].type)) {
+                        type = !isReceive ? TransactionType.SEND_NFT : TransactionType.RECEIVE_NFT;
+                    } else {
+                        type = TransactionType.SMART_CONTRACT;
+                    }
+                }
+
                 this.transactionMap.set(cell.transaction.hash, {
                     status: cell.tx_status.status as TransactionStatus,
                     transactionHash: cell.transaction.hash,
@@ -255,6 +311,8 @@ export class TransactionService {
                     outputs,
                     blockHash: cell.tx_status.block_hash,
                     blockNumber: parseInt(header.number, 16),
+                    type,
+                    amount,
                     timestamp: new Date(parseInt(header.timestamp, 16)),
                 });
             }

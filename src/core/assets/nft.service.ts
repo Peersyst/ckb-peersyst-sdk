@@ -1,6 +1,7 @@
 import { Cell } from "@ckb-lumos/lumos";
 import * as NrcSdk from "@rather-labs/nrc-721-sdk";
 import { ConnectionService } from "../connection.service";
+import { ScriptType } from "../transaction.service";
 import { NftScript, NftSdk } from "./nft.types";
 
 export interface Nft {
@@ -27,6 +28,19 @@ export class NftService {
                 indexerUrl: this.connection.getIndexerUrl(),
             });
         }
+    }
+
+    async isScriptNftScript(scriptType: ScriptType): Promise<boolean> {
+        await this.initialize();
+
+        let isNftCell: boolean;
+        try {
+            isNftCell = await this.nftSdk.nftCell.isCellNRC721(scriptType);
+        } catch (error) {
+            isNftCell = false;
+        }
+
+        return isNftCell;
     }
 
     private cellToNftScript(cell: Cell): NftScript {

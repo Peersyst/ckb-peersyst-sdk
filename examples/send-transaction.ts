@@ -18,8 +18,8 @@ const main = async () => {
 
         // You can view newly generated transaction through wallet.getTransactions
         // If you want to know transaction status
-        // const transaction = await connectionService.getTransactionFromHash(txHash);
-        // Logger.info(JSON.stringify(transaction, null, 2));
+        const transaction = await connectionService.getTransactionFromHash(txHash);
+        Logger.info(JSON.stringify(transaction, null, 2));
     } catch (error) {
         Logger.error(`${error.name}: ${error.message}`);
     }

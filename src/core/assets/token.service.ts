@@ -24,6 +24,15 @@ export class TokenService {
         this.transactionService = transactionService;
     }
 
+    private isTokenScriptType(script: Script): boolean {
+        if (!script) {
+            return false;
+        }
+
+        const sudtScript = this.connection.getConfig().SCRIPTS.SUDT;
+        return script.code_hash === sudtScript.CODE_HASH && script.hash_type === sudtScript.HASH_TYPE;
+    }
+
     async issue(address: string, amount: number, privateKey: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getEmptyCellProvider() });
         txSkeleton = await sudt.issueToken(txSkeleton, address, amount, undefined, undefined, this.connection.getConfigAsObject());
@@ -86,14 +95,5 @@ export class TokenService {
         );
 
         return tokens;
-    }
-
-    private isTokenScriptType(script: Script): boolean {
-        if (!script) {
-            return false;
-        }
-
-        const sudtScript = this.connection.getConfig().SCRIPTS.SUDT;
-        return script.code_hash === sudtScript.CODE_HASH && script.hash_type === sudtScript.HASH_TYPE;
     }
 }

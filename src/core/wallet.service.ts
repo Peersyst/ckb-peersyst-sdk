@@ -221,7 +221,7 @@ export class WalletService {
     }
 
     async getTransactions(): Promise<Transaction[]> {
-        this.refreshCellsAndTransactions();
+        await this.refreshCellsAndTransactions();
 
         return [...this.accountTransactionMap.values()].flat(1);
     }
