@@ -2,7 +2,7 @@ import { Cell, Script, utils } from "@ckb-lumos/lumos";
 import { TransactionSkeleton } from "@ckb-lumos/helpers";
 import { sudt, common } from "@ckb-lumos/common-scripts";
 import { ConnectionService } from "../connection.service";
-import { TransactionService } from "../transaction.service";
+import { FeeRate, TransactionService } from "../transaction.service";
 
 export interface TokenType {
     args: string;
@@ -24,26 +24,27 @@ export class TokenService {
         this.transactionService = transactionService;
     }
 
-    async issue(address: string, amount: number, privateKey: string): Promise<string> {
+    async issue(address: string, amount: number, privateKey: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getEmptyCellProvider() });
         txSkeleton = await sudt.issueToken(txSkeleton, address, amount, undefined, undefined, this.connection.getConfigAsObject());
-        txSkeleton = await common.payFee(
-            txSkeleton,
-            [address],
-            this.transactionService.defaultFee,
-            null,
-            this.connection.getConfigAsObject(),
-        );
+        txSkeleton = await common.payFeeByFeeRate(txSkeleton, [address], feeRate, null, this.connection.getConfigAsObject());
 
         return this.transactionService.signTransaction(txSkeleton, [privateKey]);
     }
 
-    async transfer(from: string, to: string, token: string, amount: number, privateKey: string): Promise<string> {
+    async transfer(
+        from: string,
+        to: string,
+        token: string,
+        amount: number,
+        privateKey: string,
+        feeRate: FeeRate = FeeRate.NORMAL,
+    ): Promise<string> {
         let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getCellProvider() });
         txSkeleton = await sudt.transfer(txSkeleton, [from], token, to, amount, undefined, undefined, undefined, {
             config: this.connection.getConfig(),
         });
-        txSkeleton = await common.payFee(txSkeleton, [from], this.transactionService.defaultFee, null, this.connection.getConfigAsObject());
+        txSkeleton = await common.payFeeByFeeRate(txSkeleton, [from], feeRate, null, this.connection.getConfigAsObject());
 
         return this.transactionService.signTransaction(txSkeleton, [privateKey]);
     }

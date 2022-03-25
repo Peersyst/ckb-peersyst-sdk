@@ -1,7 +1,7 @@
 import { TransactionSkeleton } from "@ckb-lumos/helpers";
 import { common } from "@ckb-lumos/common-scripts";
 import { ConnectionService } from "../connection.service";
-import { TransactionService } from "../transaction.service";
+import { TransactionService, FeeRate } from "../transaction.service";
 import { Cell } from "@ckb-lumos/lumos";
 
 export interface CKBBalance {
@@ -21,19 +21,26 @@ export class CKBService {
         this.transactionService = transactionService;
     }
 
-    async transfer(from: string, to: string, amount: bigint, privateKey: string): Promise<string> {
+    async transfer(from: string, to: string, amount: bigint, privateKey: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         if (amount < this.transferCellSize) {
             throw new Error("Minimum transfer (cell) value is 61 CKB");
         }
 
         let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getEmptyCellProvider() });
         txSkeleton = await common.transfer(txSkeleton, [from], to, amount, null, null, this.connection.getConfigAsObject());
-        txSkeleton = await common.payFee(txSkeleton, [from], this.transactionService.defaultFee, null, this.connection.getConfigAsObject());
+        txSkeleton = await common.payFeeByFeeRate(txSkeleton, [from], feeRate, null, this.connection.getConfigAsObject());
 
         return this.transactionService.signTransaction(txSkeleton, [privateKey]);
     }
 
-    async transferFromCells(cells: Cell[], fromAddresses: string[], to: string, amount: bigint, privateKeys: string[]): Promise<string> {
+    async transferFromCells(
+        cells: Cell[],
+        fromAddresses: string[],
+        to: string,
+        amount: bigint,
+        privateKeys: string[],
+        feeRate: FeeRate = FeeRate.NORMAL,
+    ): Promise<string> {
         if (amount < this.transferCellSize) {
             throw new Error("Minimum transfer (cell) value is 61 CKB");
         }
@@ -52,23 +59,15 @@ export class CKBService {
             });
         });
 
-        txSkeleton = this.transactionService.addSecp256CellDep(txSkeleton);
         // Inject capacity
-        const capacityResp = this.transactionService.injectCapacity(txSkeleton, amount, cells);
-        txSkeleton = capacityResp.txSkeleton;
+        txSkeleton = this.transactionService.addSecp256CellDep(txSkeleton);
+        txSkeleton = this.transactionService.injectCapacity(txSkeleton, amount, cells);
 
-        txSkeleton = await common.payFee(
-            txSkeleton,
-            fromAddresses,
-            this.transactionService.defaultFee,
-            null,
-            this.connection.getConfigAsObject(),
-        );
+        // Pay fee
+        txSkeleton = await common.payFeeByFeeRate(txSkeleton, fromAddresses, feeRate, null, this.connection.getConfigAsObject());
 
-        const signingPrivKeys: string[] = [];
-        for (const addressToSign of capacityResp.addressesToSign) {
-            signingPrivKeys.push(privateKeys[fromAddresses.indexOf(addressToSign)]);
-        }
+        // Get signing private keys
+        const signingPrivKeys = this.transactionService.extractPrivateKeys(txSkeleton, fromAddresses, privateKeys);
 
         return this.transactionService.signTransaction(txSkeleton, signingPrivKeys);
     }

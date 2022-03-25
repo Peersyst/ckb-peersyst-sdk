@@ -1,6 +1,6 @@
 import { mnemonic, ExtendedPrivateKey, AccountExtendedPublicKey, AddressType } from "@ckb-lumos/hd";
 import { ConnectionService } from "./connection.service";
-import { TransactionService, Transaction, TransactionStatus } from "./transaction.service";
+import { TransactionService, Transaction, TransactionStatus, FeeRate } from "./transaction.service";
 import { TokenService, TokenAmount } from "./assets/token.service";
 import { CKBBalance, CKBService } from "./assets/ckb.service";
 import { DAOBalance, DAOService, DAOStatistics, DAOUnlockableAmount } from "./dao/dao.service";
@@ -229,19 +229,25 @@ export class WalletService {
     // ---------------------------
     // -- CKB service functions --
     // ---------------------------
-    async sendTransactionSingleAccount(amount: bigint, mnemo: string, to: string, accountId = 0): Promise<string> {
+    async sendTransactionSingleAccount(
+        amount: bigint,
+        mnemo: string,
+        to: string,
+        accountId: number,
+        feeRate: FeeRate = FeeRate.NORMAL,
+    ): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
         await this.refreshCellsAndTransactions();
 
-        return this.ckbService.transfer(address, to, BigInt(amount), privateKey);
+        return this.ckbService.transfer(address, to, BigInt(amount), privateKey, feeRate);
     }
 
-    async sendTransaction(amount: bigint, mnemo: string, to: string): Promise<string> {
+    async sendTransaction(amount: bigint, mnemo: string, to: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         await this.refreshCellsAndTransactions();
         const addresses = this.getAllAddresses();
         const privateKeys = this.getAllPrivateKeys(mnemo);
 
-        return this.ckbService.transferFromCells(this.getCells(), addresses, to, BigInt(amount), privateKeys);
+        return this.ckbService.transferFromCells(this.getCells(), addresses, to, BigInt(amount), privateKeys, feeRate);
     }
 
     async getCKBBalanceFromAccount(accountId = 0): Promise<CKBBalance> {
@@ -257,17 +263,24 @@ export class WalletService {
     // -- Token service functions --
     // -----------------------------
     // Deprecated in accounts
-    async issueTokens(amount: number, mnemo: string, accountId = 0): Promise<string> {
+    async issueTokens(amount: number, mnemo: string, accountId = 0, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
 
-        return this.tokenService.issue(address, amount, privateKey);
+        return this.tokenService.issue(address, amount, privateKey, feeRate);
     }
 
     // Deprecated in accounts
-    async transferTokens(amount: number, mnemo: string, to: string, token: string, accountId = 0): Promise<string> {
+    async transferTokens(
+        amount: number,
+        mnemo: string,
+        to: string,
+        token: string,
+        accountId = 0,
+        feeRate: FeeRate = FeeRate.NORMAL,
+    ): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
 
-        return this.tokenService.transfer(address, to, token, amount, privateKey);
+        return this.tokenService.transfer(address, to, token, amount, privateKey, feeRate);
     }
 
     async getTokensBalanceFromAccount(accountId = 0): Promise<TokenAmount[]> {
@@ -295,32 +308,33 @@ export class WalletService {
     // ---------------------------
     // -- DAO service functions --
     // ---------------------------
-    async depositInDAOSingleAccount(amount: bigint, mnemo: string, accountId = 0): Promise<string> {
+    async depositInDAOSingleAccount(amount: bigint, mnemo: string, accountId = 0, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
-        return this.daoService.deposit(amount, address, address, privateKey);
+        return this.daoService.deposit(amount, address, address, privateKey, feeRate);
     }
 
-    async depositInDAO(amount: bigint, mnemo: string): Promise<string> {
+    async depositInDAO(amount: bigint, mnemo: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         await this.refreshCellsAndTransactions();
         const addresses = this.getAllAddresses();
         const privateKeys = this.getAllPrivateKeys(mnemo);
 
-        return this.daoService.depositMultiAccount(amount, this.getCells(), addresses, this.getNewAddress(), privateKeys);
+        return this.daoService.depositMultiAccount(amount, this.getCells(), addresses, this.getNewAddress(), privateKeys, feeRate);
     }
 
-    async withdrawAndUnlockFromCell(cell: Cell, mnemo: string): Promise<string> {
+    async withdrawAndUnlockFromCell(cell: Cell, mnemo: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivKeyFromLock(mnemo, cell.cell_output.lock);
         const feeAddresses = this.getAllAddresses();
+        const privateKeys = this.getAllPrivateKeys(mnemo);
         const to = this.getNewAddress();
         if (!this.daoService.isCellDeposit(cell)) {
             this.logger.warn("Cell already withrawed. Unlocking...");
-            return this.daoService.unlock(cell, privateKey, address, to, feeAddresses);
+            return this.daoService.unlock(cell, privateKey, address, to, feeAddresses, privateKeys, feeRate);
         }
         if (!(await this.daoService.isCellUnlockable(cell))) {
             throw new Error("Cell can not be unlocked. Minimum time is 30 days.");
         }
 
-        const withdrawTxHash = await this.daoService.withdraw(cell, privateKey, feeAddresses);
+        const withdrawTxHash = await this.daoService.withdraw(cell, privateKey, feeAddresses, privateKeys, feeRate);
         let commited = false;
         let transaction: TransactionWithStatus;
 
@@ -336,7 +350,7 @@ export class WalletService {
 
         // Search new withdraw cell to unlock
         const withdrawCell = await this.daoService.getWithdrawCellFromCapacityTx(cell.cell_output.capacity, address, withdrawTxHash);
-        return this.daoService.unlock(withdrawCell, privateKey, address, to, feeAddresses);
+        return this.daoService.unlock(withdrawCell, privateKey, address, to, feeAddresses, privateKeys, feeRate);
     }
 
     async withdrawAndUnlock(unlockableAmount: DAOUnlockableAmount, mnemo: string): Promise<string> {

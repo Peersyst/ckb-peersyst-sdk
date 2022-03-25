@@ -2,7 +2,7 @@ import { Cell, Script } from "@ckb-lumos/lumos";
 import { TransactionSkeleton, TransactionSkeletonType } from "@ckb-lumos/helpers";
 import { dao, common } from "@ckb-lumos/common-scripts";
 import { ConnectionService } from "../connection.service";
-import { TransactionService } from "../transaction.service";
+import { FeeRate, TransactionService } from "../transaction.service";
 import { Logger } from "../../utils/logger";
 
 export interface DAOStatistics {
@@ -179,19 +179,26 @@ export class DAOService {
         return { daoDeposit, daoCompensation };
     }
 
-    async deposit(amount: bigint, from: string, to: string, privateKey: string): Promise<string> {
+    async deposit(amount: bigint, from: string, to: string, privateKey: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         if (amount < this.daoCellSize) {
             throw new Error("Minimum deposit value is 102 CKB");
         }
 
         let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getEmptyCellProvider() });
         txSkeleton = await dao.deposit(txSkeleton, from, to, amount, this.connection.getConfigAsObject());
-        txSkeleton = await common.payFee(txSkeleton, [from], this.transactionService.defaultFee, null, this.connection.getConfigAsObject());
+        txSkeleton = await common.payFeeByFeeRate(txSkeleton, [from], feeRate, null, this.connection.getConfigAsObject());
 
         return this.transactionService.signTransaction(txSkeleton, [privateKey]);
     }
 
-    async depositMultiAccount(amount: bigint, cells: Cell[], fromAddresses: string[], to: string, privateKeys: string[]): Promise<string> {
+    async depositMultiAccount(
+        amount: bigint,
+        cells: Cell[],
+        fromAddresses: string[],
+        to: string,
+        privateKeys: string[],
+        feeRate: FeeRate = FeeRate.NORMAL,
+    ): Promise<string> {
         if (amount < this.daoCellSize) {
             throw new Error("Minimum deposit value is 102 CKB");
         }
@@ -221,43 +228,44 @@ export class DAOService {
             });
         });
 
-        txSkeleton = this.transactionService.addSecp256CellDep(txSkeleton);
         // Inject capacity
-        const capacityResp = this.transactionService.injectCapacity(txSkeleton, amount, cells);
-        txSkeleton = capacityResp.txSkeleton;
+        txSkeleton = this.transactionService.addSecp256CellDep(txSkeleton);
+        txSkeleton = this.transactionService.injectCapacity(txSkeleton, amount, cells);
 
-        // txSkeleton = await dao.deposit(txSkeleton, from, to, amount, this.connection.getConfigAsObject());
-        txSkeleton = await common.payFee(
-            txSkeleton,
-            fromAddresses,
-            this.transactionService.defaultFee,
-            null,
-            this.connection.getConfigAsObject(),
-        );
+        // Pay fee
+        txSkeleton = await common.payFeeByFeeRate(txSkeleton, fromAddresses, feeRate, null, this.connection.getConfigAsObject());
 
-        const signingPrivKeys: string[] = [];
-        for (const addressToSign of capacityResp.addressesToSign) {
-            signingPrivKeys.push(privateKeys[fromAddresses.indexOf(addressToSign)]);
-        }
+        // Get signing private keys
+        const signingPrivKeys = this.transactionService.extractPrivateKeys(txSkeleton, fromAddresses, privateKeys);
 
         return this.transactionService.signTransaction(txSkeleton, signingPrivKeys);
     }
 
-    async withdraw(inputCell: Cell, privateKey: string, feeAddresses: string[]): Promise<string> {
+    async withdraw(
+        inputCell: Cell,
+        privateKey: string,
+        feeAddresses: string[],
+        privateKeys: string[],
+        feeRate: FeeRate = FeeRate.NORMAL,
+    ): Promise<string> {
         let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getEmptyCellProvider() });
         txSkeleton = await dao.withdraw(txSkeleton, inputCell, null, this.connection.getConfigAsObject());
-        txSkeleton = await common.payFee(
-            txSkeleton,
-            feeAddresses,
-            this.transactionService.defaultFee,
-            null,
-            this.connection.getConfigAsObject(),
-        );
+        txSkeleton = await common.payFeeByFeeRate(txSkeleton, feeAddresses, feeRate, null, this.connection.getConfigAsObject());
+        const signingPrivKeys = this.transactionService.extractPrivateKeys(txSkeleton, feeAddresses, privateKeys);
+        const sortedSignPKeys = [privateKey, ...signingPrivKeys.filter((pkey) => pkey !== privateKey)];
 
-        return this.transactionService.signTransaction(txSkeleton, [privateKey]);
+        return this.transactionService.signTransaction(txSkeleton, sortedSignPKeys);
     }
 
-    async unlock(withdrawCell: Cell, privateKey: string, from: string, to: string, feeAddresses: string[]): Promise<string> {
+    async unlock(
+        withdrawCell: Cell,
+        privateKey: string,
+        from: string,
+        to: string,
+        feeAddresses: string[],
+        privateKeys: string[],
+        feeRate: FeeRate = FeeRate.NORMAL,
+    ): Promise<string> {
         let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getEmptyCellProvider() });
         const depositCell = await this.getDepositCellFromWithdrawCell(withdrawCell);
         if (!(await this.isCellUnlockable(depositCell))) {
@@ -265,15 +273,11 @@ export class DAOService {
         }
 
         txSkeleton = await dao.unlock(txSkeleton, depositCell, withdrawCell, to, from, this.connection.getConfigAsObject());
-        txSkeleton = await common.payFee(
-            txSkeleton,
-            feeAddresses,
-            this.transactionService.defaultFee,
-            null,
-            this.connection.getConfigAsObject(),
-        );
+        txSkeleton = await common.payFeeByFeeRate(txSkeleton, feeAddresses, feeRate, null, this.connection.getConfigAsObject());
+        const signingPrivKeys = this.transactionService.extractPrivateKeys(txSkeleton, feeAddresses, privateKeys);
+        const sortedSignPKeys = [privateKey, ...signingPrivKeys.filter((pkey) => pkey !== privateKey)];
 
-        return this.transactionService.signTransaction(txSkeleton, [privateKey]);
+        return this.transactionService.signTransaction(txSkeleton, sortedSignPKeys);
     }
 
     async findCorrectInputFromWithdrawCell(withdrawCell: Cell): Promise<{ index: string; txHash: string }> {

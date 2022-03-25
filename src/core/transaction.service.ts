@@ -40,6 +40,12 @@ export enum TransactionStatus {
     REJECTED = "rejected",
 }
 
+export enum FeeRate {
+    SLOW = 1000,
+    NORMAL = 100000,
+    FAST = 10000000,
+}
+
 export class TransactionService {
     private readonly connection: ConnectionService;
     private readonly TransactionCollector: any;
@@ -70,16 +76,11 @@ export class TransactionService {
         return TransactionService.addCellDep(txSkeleton, this.connection.getConfig().SCRIPTS.SECP256K1_BLAKE160);
     }
 
-    injectCapacity(
-        txSkeleton: TransactionSkeletonType,
-        capacity: bigint,
-        cells: Cell[],
-    ): { txSkeleton: TransactionSkeletonType; addressesToSign: string[] } {
+    injectCapacity(txSkeleton: TransactionSkeletonType, capacity: bigint, cells: Cell[]): TransactionSkeletonType {
         let lastScript: Script;
         let changeCell: Cell;
         let changeCapacity = BigInt(0);
         let currentAmount = capacity;
-        const addressesToSign: string[] = [];
 
         for (const cell of cells) {
             // Cell is empty
@@ -103,7 +104,6 @@ export class TransactionService {
                     lastScript.hash_type !== lockScript.hash_type
                 ) {
                     txSkeleton = this.addWitnesses(txSkeleton, lockScript);
-                    addressesToSign.push(this.connection.getAddressFromLock(lockScript));
                     lastScript = lockScript;
                 }
 
@@ -128,16 +128,20 @@ export class TransactionService {
             txSkeleton = txSkeleton.update("outputs", (outputs) => outputs.push(changeCell));
         }
 
-        return { txSkeleton, addressesToSign };
+        return txSkeleton;
     }
 
-    addWitnesses(txSkeleton: TransactionSkeletonType, fromScript: Script): TransactionSkeletonType {
-        // posar el index i from script
-        const firstIndex = txSkeleton
+    getScriptFirstIndex(txSkeleton: TransactionSkeletonType, fromScript: Script): number {
+        return txSkeleton
             .get("inputs")
             .findIndex((input) =>
                 new ScriptValue(input.cell_output.lock, { validate: false }).equals(new ScriptValue(fromScript, { validate: false })),
             );
+    }
+
+    addWitnesses(txSkeleton: TransactionSkeletonType, fromScript: Script): TransactionSkeletonType {
+        // posar el index i from script
+        const firstIndex = this.getScriptFirstIndex(txSkeleton, fromScript);
 
         if (firstIndex !== -1) {
             while (firstIndex >= txSkeleton.get("witnesses").size) {
@@ -167,6 +171,19 @@ export class TransactionService {
         }
 
         return txSkeleton;
+    }
+
+    extractPrivateKeys(txSkeleton: TransactionSkeletonType, fromAddresses: string[], privateKeys: string[]): string[] {
+        const signingPrivKeys: string[] = [];
+
+        for (let i = 0; i < fromAddresses.length; i += 1) {
+            if (this.getScriptFirstIndex(txSkeleton, this.connection.getLockFromAddress(fromAddresses[i])) !== -1) {
+                this.logger.info(i);
+                signingPrivKeys.push(privateKeys[i]);
+            }
+        }
+
+        return signingPrivKeys;
     }
 
     async lockScriptHasTransactions(lockScript: Script): Promise<boolean> {
