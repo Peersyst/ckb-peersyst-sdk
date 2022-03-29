@@ -41,7 +41,7 @@ const wallet = new WalletService(connectionService, mnemonic);
 ```
 3. Refresh wallet data:
 ```typescrypt
-await wallet.refreshCellsAndTransactions();
+await wallet.synchronize();
 ```
 4. Make any call from the wallet:
 ```typescrypt

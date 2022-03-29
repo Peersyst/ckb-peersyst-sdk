@@ -71,9 +71,9 @@ export class TokenService {
         return this.getBalanceFromCells(cells);
     }
 
-    async getBalanceFromCells(cells: Cell[]): Promise<TokenAmount[]> {
+    getBalanceFromCells(cells: Cell[]): TokenAmount[] {
         const tokenMap = new Map<string, number>();
-        for await (const cell of cells) {
+        for (const cell of cells) {
             if (this.isTokenScriptType(cell.cell_output.type)) {
                 const key = cell.cell_output.type.args;
 

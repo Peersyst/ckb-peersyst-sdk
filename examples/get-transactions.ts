@@ -11,6 +11,7 @@ const main = async () => {
 
         // Wallet instance is necessary for all wallet functions
         const wallet = new WalletService(connectionService, mnemonic);
+        await wallet.synchronize();
 
         const transactions = await wallet.getTransactions();
         Logger.info(transactions);

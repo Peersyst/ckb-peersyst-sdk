@@ -10,7 +10,7 @@ const main = async () => {
 
         // Wallet instance is necessary for all wallet functions
         const wallet = new WalletService(connectionService, mnemonic);
-        await wallet.refreshCellsAndTransactions();
+        await wallet.synchronize();
 
         const statistics = await wallet.getDAOStatistics();
         Logger.info(statistics);

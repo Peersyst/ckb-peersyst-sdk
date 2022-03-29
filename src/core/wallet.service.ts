@@ -22,6 +22,14 @@ export interface Balance {
     dao: DAOBalance;
 }
 
+export interface WalletState {
+    addressMap: Map<string, string>;
+    firstIndexWithoutTxs: number;
+    lastHashBlock: string;
+    accountCellsMap: Map<number, Cell[]>;
+    accountTransactionMap: Map<number, Transaction[]>;
+}
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class WalletService {
@@ -40,13 +48,20 @@ export class WalletService {
     private accountCellsMap = new Map<number, Cell[]>();
     private accountTransactionMap = new Map<number, Transaction[]>();
 
-    constructor(connectionService: ConnectionService, mnemo: string) {
+    constructor(connectionService: ConnectionService, mnemo: string, walletState?: WalletState) {
         this.connection = connectionService;
         this.transactionService = new TransactionService(this.connection);
         this.ckbService = new CKBService(this.connection, this.transactionService);
         this.tokenService = new TokenService(this.connection, this.transactionService);
         this.daoService = new DAOService(this.connection, this.transactionService);
         this.nftService = new NftService(this.connection);
+        if (walletState) {
+            this.addressMap = walletState.addressMap;
+            this.firstIndexWithoutTxs = walletState.firstIndexWithoutTxs;
+            this.lastHashBlock = walletState.lastHashBlock;
+            this.accountCellsMap = walletState.accountCellsMap;
+            this.accountTransactionMap = walletState.accountTransactionMap;
+        }
 
         this.accountPublicKey = WalletService.getPrivateKeyFromMnemonic(mnemo).toAccountExtendedPublicKey();
     }
@@ -63,7 +78,17 @@ export class WalletService {
     // ----------------------
     // -- Wallet functions --
     // ----------------------
-    async refreshCellsAndTransactions() {
+    getWalletBalance(): WalletState {
+        return {
+            addressMap: this.addressMap,
+            firstIndexWithoutTxs: this.firstIndexWithoutTxs,
+            lastHashBlock: this.lastHashBlock,
+            accountCellsMap: this.accountCellsMap,
+            accountTransactionMap: this.accountTransactionMap,
+        };
+    }
+
+    async synchronize(): Promise<WalletState> {
         let currentIndex = 0;
         let found = true;
         let toBlock: string;
@@ -92,11 +117,11 @@ export class WalletService {
 
                 // Update cells
                 const collectorOptions: QueryOptions = { lock: this.getLock(index), toBlock };
-                if (fromBlock) {
+                const cells: Cell[] = this.accountCellsMap.get(index) || [];
+                if (fromBlock && cells.length === 0) {
                     collectorOptions.fromBlock = fromBlock;
                 }
                 const cellCollector = cellProvider.collector(collectorOptions);
-                const cells: Cell[] = this.accountCellsMap.get(index) || [];
                 for await (const cell of cellCollector.collect()) {
                     cells.push(cell);
                 }
@@ -114,6 +139,14 @@ export class WalletService {
         }
 
         this.lastHashBlock = currentBlock.number;
+
+        return {
+            addressMap: this.addressMap,
+            firstIndexWithoutTxs: this.firstIndexWithoutTxs,
+            lastHashBlock: this.lastHashBlock,
+            accountCellsMap: this.accountCellsMap,
+            accountTransactionMap: this.accountTransactionMap,
+        };
     }
 
     getCells(): Cell[] {
@@ -204,7 +237,7 @@ export class WalletService {
     async getBalance(): Promise<Balance> {
         const cells = this.getCells();
         const ckb = this.ckbService.getBalanceFromCells(cells);
-        const tokens = await this.tokenService.getBalanceFromCells(cells);
+        const tokens = this.tokenService.getBalanceFromCells(cells);
         const nfts = await this.nftService.getBalanceFromCells(cells);
         const dao = await this.daoService.getBalanceFromCells(cells);
 
@@ -220,9 +253,7 @@ export class WalletService {
         return this.transactionService.getTransactions(address);
     }
 
-    async getTransactions(): Promise<Transaction[]> {
-        await this.refreshCellsAndTransactions();
-
+    getTransactions(): Transaction[] {
         return [...this.accountTransactionMap.values()].flat(1);
     }
 
@@ -237,13 +268,13 @@ export class WalletService {
         feeRate: FeeRate = FeeRate.NORMAL,
     ): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
-        await this.refreshCellsAndTransactions();
+        await this.synchronize();
 
         return this.ckbService.transfer(address, to, BigInt(amount), privateKey, feeRate);
     }
 
     async sendTransaction(amount: bigint, mnemo: string, to: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
-        await this.refreshCellsAndTransactions();
+        await this.synchronize();
         const addresses = this.getAllAddresses();
         const privateKeys = this.getAllPrivateKeys(mnemo);
 
@@ -255,7 +286,7 @@ export class WalletService {
         return this.ckbService.getBalance(address);
     }
 
-    async getCKBBalance(): Promise<CKBBalance> {
+    getCKBBalance(): CKBBalance {
         return this.ckbService.getBalanceFromCells(this.getCells());
     }
 
@@ -288,7 +319,7 @@ export class WalletService {
         return this.tokenService.getBalance(address);
     }
 
-    async getTokensBalance(): Promise<TokenAmount[]> {
+    getTokensBalance(): TokenAmount[] {
         return this.tokenService.getBalanceFromCells(this.getCells());
     }
 
@@ -314,7 +345,7 @@ export class WalletService {
     }
 
     async depositInDAO(amount: bigint, mnemo: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
-        await this.refreshCellsAndTransactions();
+        await this.synchronize();
         const addresses = this.getAllAddresses();
         const privateKeys = this.getAllPrivateKeys(mnemo);
 
@@ -354,7 +385,7 @@ export class WalletService {
     }
 
     async withdrawAndUnlock(unlockableAmount: DAOUnlockableAmount, mnemo: string): Promise<string> {
-        await this.refreshCellsAndTransactions();
+        await this.synchronize();
         const cells = await this.daoService.filterDAOCells(this.getCells());
 
         if (unlockableAmount.type === "total") {
