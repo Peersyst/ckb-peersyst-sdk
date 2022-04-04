@@ -30,6 +30,7 @@ export interface Transaction {
     inputs: DataRow[];
     outputs: DataRow[];
     type: TransactionType;
+    scriptType?: ScriptType;
     amount: number;
     blockHash: string;
     blockNumber: number;
@@ -283,6 +284,7 @@ export class TransactionService {
 
                 let amount = 0;
                 let type: TransactionType;
+                let scriptType: ScriptType;
                 if (outputs[0] && cell.transaction.outputs[0]) {
                     amount = outputs[0].quantity;
                     const isReceive = outputs[0].address === address;
@@ -293,14 +295,17 @@ export class TransactionService {
                         } else {
                             type = !isReceive ? TransactionType.SEND_CKB : TransactionType.RECEIVE_CKB;
                         }
-                    } else if (TransactionService.isScriptTypeScript(outputs[0].type, this.connection.getConfig().SCRIPTS.SUDT)) {
-                        type = !isReceive ? TransactionType.SEND_TOKEN : TransactionType.RECEIVE_TOKEN;
-                    } else if (TransactionService.isScriptTypeScript(outputs[0].type, this.connection.getConfig().SCRIPTS.DAO)) {
-                        type = outputs[0].data === 0 ? TransactionType.DEPOSIT_DAO : TransactionType.WITHDRAW_DAO;
-                    } else if (await this.nftService.isScriptNftScript(outputs[0].type)) {
-                        type = !isReceive ? TransactionType.SEND_NFT : TransactionType.RECEIVE_NFT;
                     } else {
-                        type = TransactionType.SMART_CONTRACT;
+                        scriptType = outputs[0].type;
+                        if (TransactionService.isScriptTypeScript(outputs[0].type, this.connection.getConfig().SCRIPTS.SUDT)) {
+                            type = !isReceive ? TransactionType.SEND_TOKEN : TransactionType.RECEIVE_TOKEN;
+                        } else if (TransactionService.isScriptTypeScript(outputs[0].type, this.connection.getConfig().SCRIPTS.DAO)) {
+                            type = outputs[0].data === 0 ? TransactionType.DEPOSIT_DAO : TransactionType.WITHDRAW_DAO;
+                        } else if (await this.nftService.isScriptNftScript(outputs[0].type)) {
+                            type = !isReceive ? TransactionType.SEND_NFT : TransactionType.RECEIVE_NFT;
+                        } else {
+                            type = TransactionType.SMART_CONTRACT;
+                        }
                     }
                 }
 
@@ -312,6 +317,7 @@ export class TransactionService {
                     blockHash: cell.tx_status.block_hash,
                     blockNumber: parseInt(header.number, 16),
                     type,
+                    scriptType,
                     amount,
                     timestamp: new Date(parseInt(header.timestamp, 16)),
                 });
