@@ -54,7 +54,8 @@ export enum TransactionType {
     DEPOSIT_DAO = "deposit_dao",
     WITHDRAW_DAO = "withdraw_dao",
     UNLOCK_DAO = "unlock_dao",
-    SMART_CONTRACT = "smart_contract",
+    SMART_CONTRACT_SEND = "smart_contract_send",
+    SMART_CONTRACT_RECEIVE = "smart_contract_receive",
 }
 
 export enum FeeRate {
@@ -304,7 +305,7 @@ export class TransactionService {
                         } else if (await this.nftService.isScriptNftScript(outputs[0].type)) {
                             type = !isReceive ? TransactionType.SEND_NFT : TransactionType.RECEIVE_NFT;
                         } else {
-                            type = TransactionType.SMART_CONTRACT;
+                            type = !isReceive ? TransactionType.SMART_CONTRACT_SEND : TransactionType.SMART_CONTRACT_RECEIVE;
                         }
                     }
                 }
