@@ -1,5 +1,6 @@
 import { Cell } from "@ckb-lumos/lumos";
 import * as NrcSdk from "@rather-labs/nrc-721-sdk";
+import { Logger } from "../../utils/logger";
 import { ConnectionService } from "../connection.service";
 import { ScriptType } from "../transaction.service";
 import { NftScript, NftSdk } from "./nft.types";
@@ -13,20 +14,30 @@ export interface Nft {
     nftExtraData: string;
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export class NftService {
     private readonly connection: ConnectionService;
-    private nftSdk: NftSdk;
+    private readonly logger = new Logger(NftService.name);
+    private nftSdk: NftSdk = null;
+    private initializing = false;
 
     constructor(connectionService: ConnectionService) {
         this.connection = connectionService;
     }
 
     async initialize() {
-        if (!this.nftSdk) {
+        if (!this.nftSdk && !this.initializing) {
+            this.initializing = true;
             this.nftSdk = await NrcSdk.initialize({
                 nodeUrl: this.connection.getCKBUrl(),
                 indexerUrl: this.connection.getIndexerUrl(),
             });
+            this.logger.info("NftService initialized");
+        } else if (!this.nftSdk) {
+            while (!this.nftSdk) {
+                await sleep(100);
+            }
         }
     }
 

@@ -74,10 +74,10 @@ export class TransactionService {
         "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
     public readonly defaultFee = BigInt(100000);
 
-    constructor(connectionService: ConnectionService) {
+    constructor(connectionService: ConnectionService, nftService: NftService) {
         this.connection = connectionService;
+        this.nftService = nftService;
         this.TransactionCollector = TxCollector;
-        this.nftService = new NftService(this.connection);
     }
 
     static addCellDep(txSkeleton: TransactionSkeletonType, scriptConfig: ScriptConfig): TransactionSkeletonType {

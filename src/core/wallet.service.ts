@@ -50,11 +50,11 @@ export class WalletService {
 
     constructor(connectionService: ConnectionService, mnemo: string, walletState?: WalletState) {
         this.connection = connectionService;
-        this.transactionService = new TransactionService(this.connection);
+        this.nftService = new NftService(this.connection);
+        this.transactionService = new TransactionService(this.connection, this.nftService);
         this.ckbService = new CKBService(this.connection, this.transactionService);
         this.tokenService = new TokenService(this.connection, this.transactionService);
         this.daoService = new DAOService(this.connection, this.transactionService);
-        this.nftService = new NftService(this.connection);
         if (walletState) {
             this.addressMap = walletState.addressMap;
             this.firstIndexWithoutTxs = walletState.firstIndexWithoutTxs;
