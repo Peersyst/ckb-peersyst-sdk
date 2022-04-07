@@ -153,6 +153,10 @@ export class WalletService {
         return [...this.accountCellsMap.values()].flat(1);
     }
 
+    getNextAddress(): string {
+        return this.getAddress(this.firstIndexWithoutTxs);
+    }
+
     getNewAddress(): string {
         this.firstIndexWithoutTxs += 1;
         return this.getAddress(this.firstIndexWithoutTxs - 1);
