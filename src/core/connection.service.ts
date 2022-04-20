@@ -10,6 +10,7 @@ import {
     QueryOptions,
 } from "@ckb-lumos/base";
 import { Config } from "@ckb-lumos/config-manager";
+import { isSecp256k1Blake160Address, isAcpAddress, isSecp256k1Blake160MultisigAddress } from "@ckb-lumos/common-scripts/lib/helper";
 
 // AGGRON4 for test, LINA for main
 const { AGGRON4, LINA } = config.predefined;
@@ -134,5 +135,13 @@ export class ConnectionService {
 
     getLockFromAddress(address: string): Script {
         return helpers.parseAddress(address, { config: this.config });
+    }
+
+    isAddress(address: string): boolean {
+        return (
+            isSecp256k1Blake160Address(address, this.config) ||
+            isAcpAddress(address, this.config) ||
+            isSecp256k1Blake160MultisigAddress(address, this.config)
+        );
     }
 }

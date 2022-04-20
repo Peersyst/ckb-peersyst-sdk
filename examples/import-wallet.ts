@@ -21,6 +21,7 @@ const main = async () => {
         Logger.info(addresses);
         const newAddress = wallet.getNewAddress();
         Logger.info(newAddress);
+        Logger.info(connectionService.isAddress(newAddress));
     } catch (error) {
         Logger.error(`${error.name}: ${error.message}`);
     }
