@@ -47,14 +47,26 @@ export class WalletService {
     private lastHashBlock: string;
     private accountCellsMap = new Map<number, Cell[]>();
     private accountTransactionMap = new Map<number, Transaction[]>();
+    private onSync: (walletState: WalletState) => Promise<void>;
 
-    constructor(connectionService: ConnectionService, mnemo: string, walletState?: WalletState) {
+    constructor(
+        connectionService: ConnectionService,
+        mnemo: string,
+        walletState?: WalletState,
+        onSync?: (walletState: WalletState) => Promise<void>,
+    ) {
+        if (!WalletService.validateMnemonic(mnemo)) {
+            this.logger.error("Invalid Mnemonic");
+            throw new Error("Invalid Mnemonic");
+        }
+
         this.connection = connectionService;
         this.nftService = new NftService(this.connection);
         this.transactionService = new TransactionService(this.connection, this.nftService);
         this.ckbService = new CKBService(this.connection, this.transactionService);
         this.tokenService = new TokenService(this.connection, this.transactionService);
         this.daoService = new DAOService(this.connection, this.transactionService);
+
         if (walletState) {
             this.addressMap = walletState.addressMap;
             this.firstIndexWithoutTxs = walletState.firstIndexWithoutTxs;
@@ -63,11 +75,19 @@ export class WalletService {
             this.accountTransactionMap = walletState.accountTransactionMap;
         }
 
+        if (onSync) {
+            this.onSync = onSync;
+        }
+
         this.accountPublicKey = WalletService.getPrivateKeyFromMnemonic(mnemo).toAccountExtendedPublicKey();
     }
 
     static createNewMnemonic() {
         return mnemonic.generateMnemonic();
+    }
+
+    static validateMnemonic(mnemo: string): boolean {
+        return mnemonic.validateMnemonic(mnemo);
     }
 
     private static getPrivateKeyFromMnemonic(mnemo: string): ExtendedPrivateKey {
@@ -78,7 +98,7 @@ export class WalletService {
     // ----------------------
     // -- Wallet functions --
     // ----------------------
-    getWalletBalance(): WalletState {
+    getWalletState(): WalletState {
         return {
             addressMap: this.addressMap,
             firstIndexWithoutTxs: this.firstIndexWithoutTxs,
@@ -140,13 +160,12 @@ export class WalletService {
 
         this.lastHashBlock = currentBlock.number;
 
-        return {
-            addressMap: this.addressMap,
-            firstIndexWithoutTxs: this.firstIndexWithoutTxs,
-            lastHashBlock: this.lastHashBlock,
-            accountCellsMap: this.accountCellsMap,
-            accountTransactionMap: this.accountTransactionMap,
-        };
+        const walletState = this.getWalletState();
+        if (this.onSync) {
+            await this.onSync(walletState);
+        }
+
+        return walletState;
     }
 
     getCells(): Cell[] {

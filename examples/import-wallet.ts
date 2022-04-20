@@ -1,4 +1,4 @@
-import { ConnectionService, Environments, WalletService, Logger } from "../src";
+import { ConnectionService, Environments, WalletService, Logger, WalletState } from "../src";
 
 const ckbUrl = "http://78.46.174.87:8114/rpc";
 const indexerUrl = "http://78.46.174.87:8114/indexer";
@@ -9,7 +9,10 @@ const main = async () => {
         const connectionService = new ConnectionService(ckbUrl, indexerUrl, Environments.Testnet);
 
         // Wallet instance is necessary for all wallet functions
-        const wallet = new WalletService(connectionService, mnemonic);
+        const wallet = new WalletService(connectionService, mnemonic, null, async (walletState: WalletState) => {
+            Logger.info("Got wallet State:");
+            Logger.info(walletState);
+        });
 
         await wallet.synchronize();
         const accounts = wallet.getAccountIndexes();
