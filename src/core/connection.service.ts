@@ -138,10 +138,16 @@ export class ConnectionService {
     }
 
     isAddress(address: string): boolean {
-        return (
-            isSecp256k1Blake160Address(address, this.config) ||
-            isAcpAddress(address, this.config) ||
-            isSecp256k1Blake160MultisigAddress(address, this.config)
-        );
+        try {
+            return (
+                isSecp256k1Blake160Address(address, this.config) ||
+                isAcpAddress(address, this.config) ||
+                isSecp256k1Blake160MultisigAddress(address, this.config)
+            );
+        } catch (err) {
+            return false;
+        }
+
+        return false;
     }
 }
