@@ -22,16 +22,27 @@ export interface Balance {
     dao: DAOBalance;
 }
 
+export interface addressMapI {
+    [key: string]: string;
+}
+
+export interface cellMapI {
+    [key: number]: Cell[];
+}
+
+export interface transactionMapI {
+    [key: number]: Transaction[];
+}
+
 export interface WalletState {
-    addressMap: Map<string, string>;
+    addressMap: addressMapI;
     firstIndexWithoutTxs: number;
     lastHashBlock: string;
-    accountCellsMap: Map<number, Cell[]>;
-    accountTransactionMap: Map<number, Transaction[]>;
+    accountCellsMap: cellMapI;
+    accountTransactionMap: transactionMapI;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 export class WalletService {
     private readonly connection: ConnectionService;
     private readonly transactionService: TransactionService;
@@ -42,11 +53,11 @@ export class WalletService {
     private readonly accountPublicKey: AccountExtendedPublicKey;
     private readonly addressType = AddressType.Receiving;
     private readonly logger = new Logger(WalletService.name);
-    private addressMap = new Map<string, string>();
+    private addressMap: addressMapI = {};
     private firstIndexWithoutTxs = 0;
     private lastHashBlock: string;
-    private accountCellsMap = new Map<number, Cell[]>();
-    private accountTransactionMap = new Map<number, Transaction[]>();
+    private accountCellsMap: cellMapI = {};
+    private accountTransactionMap: transactionMapI = {};
     private onSync: (walletState: WalletState) => Promise<void>;
 
     constructor(
@@ -68,12 +79,11 @@ export class WalletService {
         this.daoService = new DAOService(this.connection, this.transactionService);
 
         if (walletState) {
-            this.addressMap = walletState.addressMap instanceof Map ? walletState.addressMap : this.addressMap;
+            this.addressMap = walletState.addressMap ? walletState.addressMap : this.addressMap;
             this.firstIndexWithoutTxs = walletState.firstIndexWithoutTxs || 0;
             this.lastHashBlock = walletState.lastHashBlock || null;
-            this.accountCellsMap = walletState.accountCellsMap instanceof Map ? walletState.accountCellsMap : this.accountCellsMap;
-            this.accountTransactionMap =
-                walletState.accountTransactionMap instanceof Map ? walletState.accountTransactionMap : this.accountTransactionMap;
+            this.accountCellsMap = walletState.accountCellsMap ? walletState.accountCellsMap : this.accountCellsMap;
+            this.accountTransactionMap = walletState.accountTransactionMap ? walletState.accountTransactionMap : this.accountTransactionMap;
         }
 
         if (onSync) {
@@ -133,12 +143,12 @@ export class WalletService {
 
             if (transactions.length > 0) {
                 // Update transactions
-                const currentTxs: Transaction[] = this.accountTransactionMap.get(index) || [];
-                this.accountTransactionMap.set(index, currentTxs.concat(transactions));
+                const currentTxs: Transaction[] = this.accountTransactionMap[index] || [];
+                this.accountTransactionMap[index] = currentTxs.concat(transactions);
 
                 // Update cells
                 const collectorOptions: QueryOptions = { lock: this.getLock(index), toBlock };
-                const cells: Cell[] = this.accountCellsMap.get(index) || [];
+                const cells: Cell[] = this.accountCellsMap[index] || [];
                 if (fromBlock && cells.length === 0) {
                     collectorOptions.fromBlock = fromBlock;
                 }
@@ -146,7 +156,7 @@ export class WalletService {
                 for await (const cell of cellCollector.collect()) {
                     cells.push(cell);
                 }
-                this.accountCellsMap.set(index, cells);
+                this.accountCellsMap[index] = cells;
 
                 // Update indexes
                 if (index === this.firstIndexWithoutTxs) {
@@ -170,7 +180,7 @@ export class WalletService {
     }
 
     getCells(): Cell[] {
-        return [...this.accountCellsMap.values()].flat(1);
+        return [...Object.values(this.accountCellsMap)].flat(1);
     }
 
     getNextAddress(): string {
@@ -199,12 +209,12 @@ export class WalletService {
 
     getAddress(accountId = 0, script: AddressScriptType = AddressScriptType.SECP256K1_BLAKE160): string {
         const key = `${accountId}-${script}`;
-        if (!this.addressMap.has(key)) {
+        if (!this.addressMap[key]) {
             const address = this.connection.getAddressFromLock(this.getLock(accountId, script));
-            this.addressMap.set(key, address);
+            this.addressMap[key] = address;
         }
 
-        return this.addressMap.get(key);
+        return this.addressMap[key];
     }
 
     getAllAddresses(): string[] {
@@ -278,7 +288,7 @@ export class WalletService {
     }
 
     getTransactions(): Transaction[] {
-        return [...this.accountTransactionMap.values()].flat(1);
+        return [...Object.values(this.accountTransactionMap)].flat(1);
     }
 
     // ---------------------------
