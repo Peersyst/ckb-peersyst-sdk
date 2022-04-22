@@ -18,6 +18,8 @@ const main = async () => {
         Logger.info(balanceAcc1);
         const totalBalance = await wallet.getBalance();
         Logger.info(totalBalance);
+        const addresses = wallet.getAllAddresses();
+        Logger.info(addresses);
     } catch (error) {
         Logger.error(`${error.name}: ${error.message}`);
     }
