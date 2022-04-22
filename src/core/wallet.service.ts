@@ -68,11 +68,12 @@ export class WalletService {
         this.daoService = new DAOService(this.connection, this.transactionService);
 
         if (walletState) {
-            this.addressMap = walletState.addressMap;
-            this.firstIndexWithoutTxs = walletState.firstIndexWithoutTxs;
-            this.lastHashBlock = walletState.lastHashBlock;
-            this.accountCellsMap = walletState.accountCellsMap;
-            this.accountTransactionMap = walletState.accountTransactionMap;
+            this.addressMap = walletState.addressMap instanceof Map ? walletState.addressMap : this.addressMap;
+            this.firstIndexWithoutTxs = walletState.firstIndexWithoutTxs || 0;
+            this.lastHashBlock = walletState.lastHashBlock || null;
+            this.accountCellsMap = walletState.accountCellsMap instanceof Map ? walletState.accountCellsMap : this.accountCellsMap;
+            this.accountTransactionMap =
+                walletState.accountTransactionMap instanceof Map ? walletState.accountTransactionMap : this.accountTransactionMap;
         }
 
         if (onSync) {

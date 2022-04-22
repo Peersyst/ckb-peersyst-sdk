@@ -3,6 +3,7 @@ import { ConnectionService, Environments, WalletService, Logger, WalletState } f
 const ckbUrl = "http://78.46.174.87:8114/rpc";
 const indexerUrl = "http://78.46.174.87:8114/indexer";
 const mnemonic = "private pond zero popular fashion omit february obscure pattern city camp pistol";
+// const mnemonic2 = "teach act exotic into script once dutch choice menu elite apple faith";
 
 const main = async () => {
     try {
