@@ -123,7 +123,6 @@ export class WalletService {
 
     async synchronize(): Promise<WalletState> {
         let currentIndex = 0;
-        let found = true;
         let toBlock: string;
         let fromBlock: string;
         const currentBlock = await this.connection.getCurrentBlockHeader();
@@ -137,39 +136,30 @@ export class WalletService {
 
         const cellProvider = this.connection.getCellProvider({ toBlock });
 
-        while (currentIndex < this.firstIndexWithoutTxs || found) {
-            found = false;
-            const index = currentIndex < this.firstIndexWithoutTxs ? currentIndex : this.firstIndexWithoutTxs;
-            const address = this.getAddress(index);
+        while (currentIndex <= this.firstIndexWithoutTxs) {
+            const address = this.getAddress(currentIndex);
             const transactions = await this.transactionService.getTransactions(address, toBlock, fromBlock);
 
             if (transactions.length > 0) {
                 // Update transactions
-                const currentTxs: Transaction[] = this.accountTransactionMap[index] || [];
-                this.accountTransactionMap[index] = [...currentTxs, ...transactions];
+                const currentTxs: Transaction[] = this.accountTransactionMap[currentIndex] || [];
+                this.accountTransactionMap[currentIndex] = [...currentTxs, ...transactions];
 
                 // Update cells
-                const collectorOptions: QueryOptions = { lock: this.getLock(index), toBlock };
                 const newCells: Cell[] = [];
-                if (fromBlock) {
-                    collectorOptions.fromBlock = fromBlock;
-                }
+                const collectorOptions: QueryOptions = { lock: this.getLock(currentIndex), toBlock };
                 const cellCollector = cellProvider.collector(collectorOptions);
                 for await (const cell of cellCollector.collect()) {
                     newCells.push(cell);
                 }
-                const cells: Cell[] = this.accountCellsMap[index] || [];
-                this.accountCellsMap[index] = [...cells, ...newCells];
+                this.accountCellsMap[currentIndex] = newCells;
 
                 // Update indexes
-                if (index === this.firstIndexWithoutTxs) {
+                if (currentIndex === this.firstIndexWithoutTxs) {
                     this.firstIndexWithoutTxs += 1;
                 }
-                found = true;
             }
-            if (index === currentIndex && index !== this.firstIndexWithoutTxs) {
-                currentIndex += 1;
-            }
+            currentIndex += 1;
         }
 
         this.lastHashBlock = currentBlock.number;
