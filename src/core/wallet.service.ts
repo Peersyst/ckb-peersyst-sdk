@@ -79,11 +79,13 @@ export class WalletService {
         this.daoService = new DAOService(this.connection, this.transactionService);
 
         if (walletState) {
-            this.addressMap = walletState.addressMap ? walletState.addressMap : this.addressMap;
+            this.addressMap = walletState.addressMap ? { ...walletState.addressMap } : this.addressMap;
             this.firstIndexWithoutTxs = walletState.firstIndexWithoutTxs || 0;
             this.lastHashBlock = walletState.lastHashBlock || null;
-            this.accountCellsMap = walletState.accountCellsMap ? walletState.accountCellsMap : this.accountCellsMap;
-            this.accountTransactionMap = walletState.accountTransactionMap ? walletState.accountTransactionMap : this.accountTransactionMap;
+            this.accountCellsMap = walletState.accountCellsMap ? { ...walletState.accountCellsMap } : this.accountCellsMap;
+            this.accountTransactionMap = walletState.accountTransactionMap
+                ? { ...walletState.accountTransactionMap }
+                : this.accountTransactionMap;
         }
 
         if (onSync) {
@@ -111,11 +113,11 @@ export class WalletService {
     // ----------------------
     getWalletState(): WalletState {
         return {
-            addressMap: this.addressMap,
+            addressMap: { ...this.addressMap },
             firstIndexWithoutTxs: this.firstIndexWithoutTxs,
             lastHashBlock: this.lastHashBlock,
-            accountCellsMap: this.accountCellsMap,
-            accountTransactionMap: this.accountTransactionMap,
+            accountCellsMap: { ...this.accountCellsMap },
+            accountTransactionMap: { ...this.accountTransactionMap },
         };
     }
 
@@ -144,19 +146,20 @@ export class WalletService {
             if (transactions.length > 0) {
                 // Update transactions
                 const currentTxs: Transaction[] = this.accountTransactionMap[index] || [];
-                this.accountTransactionMap[index] = currentTxs.concat(transactions);
+                this.accountTransactionMap[index] = [...currentTxs, ...transactions];
 
                 // Update cells
                 const collectorOptions: QueryOptions = { lock: this.getLock(index), toBlock };
-                const cells: Cell[] = this.accountCellsMap[index] || [];
-                if (fromBlock && cells.length === 0) {
+                const newCells: Cell[] = [];
+                if (fromBlock) {
                     collectorOptions.fromBlock = fromBlock;
                 }
                 const cellCollector = cellProvider.collector(collectorOptions);
                 for await (const cell of cellCollector.collect()) {
-                    cells.push(cell);
+                    newCells.push(cell);
                 }
-                this.accountCellsMap[index] = cells;
+                const cells: Cell[] = this.accountCellsMap[index] || [];
+                this.accountCellsMap[index] = [...cells, ...newCells];
 
                 // Update indexes
                 if (index === this.firstIndexWithoutTxs) {
