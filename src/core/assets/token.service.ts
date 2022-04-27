@@ -17,7 +17,7 @@ export interface TokenAmount {
 export class TokenService {
     private readonly connection: ConnectionService;
     private readonly transactionService: TransactionService;
-    // private readonly sudtCellSize = BigInt(142 * 10 ** 8);
+    // private readonly sudtCellSize = BI.from(142 * 10 ** 8);
 
     constructor(connectionService: ConnectionService, transactionService: TransactionService) {
         this.connection = connectionService;

@@ -2,18 +2,18 @@ import { TransactionSkeleton } from "@ckb-lumos/helpers";
 import { common } from "@ckb-lumos/common-scripts";
 import { ConnectionService } from "../connection.service";
 import { TransactionService, FeeRate } from "../transaction.service";
-import { Cell } from "@ckb-lumos/lumos";
+import { Cell, BI } from "@ckb-lumos/lumos";
 
 export interface CKBBalance {
-    totalBalance: bigint;
-    occupiedBalance: bigint;
-    freeBalance: bigint;
+    totalBalance: BI;
+    occupiedBalance: BI;
+    freeBalance: BI;
 }
 
 export class CKBService {
     private readonly connection: ConnectionService;
     private readonly transactionService: TransactionService;
-    private readonly transferCellSize = BigInt(61 * 10 ** 8);
+    private readonly transferCellSize = BI.from(61 * 10 ** 8);
     private readonly transferData = "0x";
 
     constructor(connectionService: ConnectionService, transactionService: TransactionService) {
@@ -21,8 +21,8 @@ export class CKBService {
         this.transactionService = transactionService;
     }
 
-    async transfer(from: string, to: string, amount: bigint, privateKey: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
-        if (amount < this.transferCellSize) {
+    async transfer(from: string, to: string, amount: BI, privateKey: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
+        if (amount.lt(this.transferCellSize)) {
             throw new Error("Minimum transfer (cell) value is 61 CKB");
         }
 
@@ -37,11 +37,11 @@ export class CKBService {
         cells: Cell[],
         fromAddresses: string[],
         to: string,
-        amount: bigint,
+        amount: BI,
         privateKeys: string[],
         feeRate: FeeRate = FeeRate.NORMAL,
     ): Promise<string> {
-        if (amount < this.transferCellSize) {
+        if (amount.lt(this.transferCellSize)) {
             throw new Error("Minimum transfer (cell) value is 61 CKB");
         }
 
@@ -86,16 +86,16 @@ export class CKBService {
     }
 
     getBalanceFromCells(cells: Cell[]): CKBBalance {
-        let totalBalance = BigInt(0);
-        let occupiedBalance = BigInt(0);
+        let totalBalance = BI.from(0);
+        let occupiedBalance = BI.from(0);
 
         for (const cell of cells) {
-            totalBalance += BigInt(cell.cell_output.capacity);
+            totalBalance = totalBalance.add(BI.from(cell.cell_output.capacity));
             if (cell.cell_output.type) {
-                occupiedBalance += BigInt(cell.cell_output.capacity);
+                occupiedBalance = occupiedBalance.add(BI.from(cell.cell_output.capacity));
             }
         }
-        const freeBalance = totalBalance - occupiedBalance;
+        const freeBalance = totalBalance.sub(occupiedBalance);
 
         return { totalBalance, occupiedBalance, freeBalance };
     }

@@ -4,7 +4,8 @@ import { TransactionService, Transaction, TransactionStatus, FeeRate } from "./t
 import { TokenService, TokenAmount } from "./assets/token.service";
 import { CKBBalance, CKBService } from "./assets/ckb.service";
 import { DAOBalance, DAOService, DAOStatistics, DAOUnlockableAmount } from "./dao/dao.service";
-import { Cell, Script } from "@ckb-lumos/lumos";
+import { Cell, Script, BI } from "@ckb-lumos/lumos";
+import { BIish } from "@ckb-lumos/bi";
 import { TransactionWithStatus, QueryOptions } from "@ckb-lumos/base";
 import { Nft, NftService } from "./assets/nft.service";
 import { Logger } from "../utils/logger";
@@ -298,7 +299,7 @@ export class WalletService {
     // -- CKB service functions --
     // ---------------------------
     async sendTransactionSingleAccount(
-        amount: bigint,
+        amount: BIish,
         mnemo: string,
         to: string,
         accountId: number,
@@ -307,15 +308,15 @@ export class WalletService {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
         await this.synchronize();
 
-        return this.ckbService.transfer(address, to, BigInt(amount), privateKey, feeRate);
+        return this.ckbService.transfer(address, to, BI.from(amount), privateKey, feeRate);
     }
 
-    async sendTransaction(amount: bigint, mnemo: string, to: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
+    async sendTransaction(amount: BIish, mnemo: string, to: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         await this.synchronize();
         const addresses = this.getAllAddresses();
         const privateKeys = this.getAllPrivateKeys(mnemo);
 
-        return this.ckbService.transferFromCells(this.getCells(), addresses, to, BigInt(amount), privateKeys, feeRate);
+        return this.ckbService.transferFromCells(this.getCells(), addresses, to, BI.from(amount), privateKeys, feeRate);
     }
 
     async getCKBBalanceFromAccount(accountId = 0): Promise<CKBBalance> {
@@ -376,17 +377,17 @@ export class WalletService {
     // ---------------------------
     // -- DAO service functions --
     // ---------------------------
-    async depositInDAOSingleAccount(amount: bigint, mnemo: string, accountId = 0, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
+    async depositInDAOSingleAccount(amount: BIish, mnemo: string, accountId = 0, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
-        return this.daoService.deposit(amount, address, address, privateKey, feeRate);
+        return this.daoService.deposit(BI.from(amount), address, address, privateKey, feeRate);
     }
 
-    async depositInDAO(amount: bigint, mnemo: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
+    async depositInDAO(amount: BIish, mnemo: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         await this.synchronize();
         const addresses = this.getAllAddresses();
         const privateKeys = this.getAllPrivateKeys(mnemo);
 
-        return this.daoService.depositMultiAccount(amount, this.getCells(), addresses, this.getNewAddress(), privateKeys, feeRate);
+        return this.daoService.depositMultiAccount(BI.from(amount), this.getCells(), addresses, this.getNewAddress(), privateKeys, feeRate);
     }
 
     async withdrawAndUnlockFromCell(cell: Cell, mnemo: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
