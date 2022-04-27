@@ -20,7 +20,7 @@ const main = async () => {
         Logger.info(accounts);
         const addresses = wallet.getAllAddresses();
         Logger.info(addresses);
-        const newAddress = wallet.getNewAddress();
+        const newAddress = wallet.getNextAddress();
         Logger.info(newAddress);
         Logger.info(connectionService.isAddress(newAddress));
         Logger.info(connectionService.isAddress(""));

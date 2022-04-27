@@ -190,11 +190,6 @@ export class WalletService {
         return this.getAddress(this.firstIndexWithoutTxs);
     }
 
-    getNewAddress(): string {
-        this.firstIndexWithoutTxs += 1;
-        return this.getAddress(this.firstIndexWithoutTxs - 1);
-    }
-
     getAccountIndexes(): number[] {
         return [...Array(this.firstIndexWithoutTxs).keys()];
     }
@@ -291,7 +286,7 @@ export class WalletService {
     }
 
     getTransactions(): Transaction[] {
-        return [...Object.values(this.accountTransactionMap)].flat(1);
+        return [...Object.values(this.accountTransactionMap)].flat(1).sort((txa, txb) => txa.blockNumber - txb.blockNumber);
     }
 
     // ---------------------------
@@ -386,14 +381,15 @@ export class WalletService {
         const addresses = this.getAllAddresses();
         const privateKeys = this.getAllPrivateKeys(mnemo);
 
-        return this.daoService.depositMultiAccount(amount, this.getCells(), addresses, this.getNewAddress(), privateKeys, feeRate);
+        return this.daoService.depositMultiAccount(amount, this.getCells(), addresses, this.getNextAddress(), privateKeys, feeRate);
     }
 
     async withdrawAndUnlockFromCell(cell: Cell, mnemo: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
+        await this.synchronize();
         const { address, privateKey } = this.getAddressAndPrivKeyFromLock(mnemo, cell.cell_output.lock);
         const feeAddresses = this.getAllAddresses();
         const privateKeys = this.getAllPrivateKeys(mnemo);
-        const to = this.getNewAddress();
+        const to = this.getNextAddress();
         if (!this.daoService.isCellDeposit(cell)) {
             this.logger.warn("Cell already withrawed. Unlocking...");
             return this.daoService.unlock(cell, privateKey, address, to, feeAddresses, privateKeys, feeRate);

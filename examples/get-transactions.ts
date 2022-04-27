@@ -13,8 +13,10 @@ const main = async () => {
         const wallet = new WalletService(connectionService, mnemonic);
         await wallet.synchronize();
 
-        const transactions = await wallet.getTransactions();
+        const transactions = wallet.getTransactions();
         Logger.info(transactions);
+        const addresses = wallet.getAllAddresses();
+        Logger.info(addresses);
     } catch (error) {
         Logger.error(`${error.name}: ${error.message}`);
         Logger.error(`${error.stack}`);
