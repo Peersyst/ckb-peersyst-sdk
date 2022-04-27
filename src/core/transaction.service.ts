@@ -335,9 +335,6 @@ export class TransactionService {
 
     async signTransaction(txSkeleton: TransactionSkeletonType, privateKeys: string[]): Promise<string> {
         const txSkeletonWEntries = commons.common.prepareSigningEntries(txSkeleton, this.connection.getConfigAsObject());
-        this.logger.info(privateKeys);
-        this.logger.info(privateKeys.length);
-        this.logger.info(txSkeletonWEntries.get("signingEntries").count());
         if (privateKeys.length !== txSkeletonWEntries.get("signingEntries").count()) {
             this.logger.error("Invalid private keys length");
             throw new Error("Invalid private keys length");
@@ -349,7 +346,6 @@ export class TransactionService {
             signatures.push(hd.key.signRecoverable(entry.message, privateKeys[i]));
         }
         const tx = sealTransaction(txSkeletonWEntries, signatures);
-        this.logger.info(JSON.stringify(tx, null, 2));
         const hash = await this.connection.getRPC().send_transaction(tx, "passthrough");
 
         return hash;
