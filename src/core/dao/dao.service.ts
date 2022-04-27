@@ -1,5 +1,4 @@
-import { Cell, Script, BI } from "@ckb-lumos/lumos";
-import { BIish } from "@ckb-lumos/bi";
+import { Cell, Script } from "@ckb-lumos/lumos";
 import { TransactionSkeleton, TransactionSkeletonType } from "@ckb-lumos/helpers";
 import { dao, common } from "@ckb-lumos/common-scripts";
 import { ConnectionService } from "../connection.service";
@@ -7,19 +6,19 @@ import { FeeRate, TransactionService } from "../transaction.service";
 import { Logger } from "../../utils/logger";
 
 export interface DAOStatistics {
-    maximumWithdraw: BI;
-    daoEarliestSince: BI;
+    maximumWithdraw: bigint;
+    daoEarliestSince: bigint;
 }
 
 export interface DAOBalance {
-    daoDeposit: BI;
-    daoCompensation: BI;
+    daoDeposit: bigint;
+    daoCompensation: bigint;
 }
 
 export interface DAOUnlockableAmount {
     type: "total" | "single";
-    amount: BIish;
-    compensation: BIish;
+    amount: bigint;
+    compensation: bigint;
     unlockable: boolean;
     unlockableDate: Date;
     txHash: string;
@@ -35,7 +34,7 @@ export class DAOService {
     private readonly connection: ConnectionService;
     private readonly transactionService: TransactionService;
     private readonly logger = new Logger(DAOService.name);
-    private readonly daoCellSize: BI = BI.from(102 * 10 ** 8);
+    private readonly daoCellSize = BigInt(102 * 10 ** 8);
     private readonly daoScriptArgs = "0x";
     private readonly depositDaoData = "0x0000000000000000";
     private readonly unlockMinTime = 30 * 24 * 60 * 60 * 1000; // 30 days in milliseconds
@@ -140,12 +139,12 @@ export class DAOService {
 
     async getBalance(address: string): Promise<DAOBalance> {
         const cells = await this.getCells(address, DAOCellType.ALL);
-        let daoDeposit = BI.from(0);
-        let daoCompensation = BI.from(0);
+        let daoDeposit = BigInt(0);
+        let daoCompensation = BigInt(0);
 
         for (let i = 0; i < cells.length; i += 1) {
-            let maxWithdraw = BI.from(0);
-            daoDeposit = daoDeposit.add(BI.from(cells[i].cell_output.capacity));
+            let maxWithdraw = BigInt(0);
+            daoDeposit += BigInt(cells[i].cell_output.capacity);
 
             if (this.isCellDeposit(cells[i])) {
                 maxWithdraw = await this.getDepositCellMaximumWithdraw(cells[i]);
@@ -153,7 +152,7 @@ export class DAOService {
                 maxWithdraw = await this.getWithdrawCellMaximumWithdraw(cells[i]);
             }
 
-            daoCompensation = daoCompensation.add(maxWithdraw.sub(BI.from(cells[i].cell_output.capacity)));
+            daoCompensation += maxWithdraw - BigInt(cells[i].cell_output.capacity);
         }
 
         return { daoDeposit, daoCompensation };
@@ -161,12 +160,12 @@ export class DAOService {
 
     async getBalanceFromCells(cells: Cell[]): Promise<DAOBalance> {
         const daoCells = await this.filterDAOCells(cells, DAOCellType.ALL);
-        let daoDeposit = BI.from(0);
-        let daoCompensation = BI.from(0);
+        let daoDeposit = BigInt(0);
+        let daoCompensation = BigInt(0);
 
         for (let i = 0; i < daoCells.length; i += 1) {
-            let maxWithdraw = BI.from(0);
-            daoDeposit = daoDeposit.add(BI.from(daoCells[i].cell_output.capacity));
+            let maxWithdraw = BigInt(0);
+            daoDeposit += BigInt(daoCells[i].cell_output.capacity);
 
             if (this.isCellDeposit(daoCells[i])) {
                 maxWithdraw = await this.getDepositCellMaximumWithdraw(daoCells[i]);
@@ -174,14 +173,14 @@ export class DAOService {
                 maxWithdraw = await this.getWithdrawCellMaximumWithdraw(daoCells[i]);
             }
 
-            daoCompensation = daoCompensation.add(maxWithdraw.sub(BI.from(daoCells[i].cell_output.capacity)));
+            daoCompensation += maxWithdraw - BigInt(daoCells[i].cell_output.capacity);
         }
 
         return { daoDeposit, daoCompensation };
     }
 
-    async deposit(amount: BI, from: string, to: string, privateKey: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
-        if (amount.lt(this.daoCellSize)) {
+    async deposit(amount: bigint, from: string, to: string, privateKey: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
+        if (amount < this.daoCellSize) {
             throw new Error("Minimum deposit value is 102 CKB");
         }
 
@@ -193,14 +192,14 @@ export class DAOService {
     }
 
     async depositMultiAccount(
-        amount: BI,
+        amount: bigint,
         cells: Cell[],
         fromAddresses: string[],
         to: string,
         privateKeys: string[],
         feeRate: FeeRate = FeeRate.NORMAL,
     ): Promise<string> {
-        if (amount.lt(this.daoCellSize)) {
+        if (amount < this.daoCellSize) {
             throw new Error("Minimum deposit value is 102 CKB");
         }
 
@@ -212,7 +211,7 @@ export class DAOService {
         txSkeleton = txSkeleton.update("outputs", (outputs) => {
             return outputs.push({
                 cell_output: {
-                    capacity: amount.toHexString(),
+                    capacity: "0x" + amount.toString(16),
                     lock: toScript,
                     type: this.getDAOScript(),
                 },
@@ -316,7 +315,7 @@ export class DAOService {
 
     async findCellFromUnlockableAmountAndCells(unlockableAmount: DAOUnlockableAmount, cells: Cell[]): Promise<Cell> {
         const filtCells = await this.filterDAOCells(cells);
-        const capacity = BI.from(unlockableAmount.amount).toHexString();
+        const capacity = `0x${unlockableAmount.amount.toString(16)}`;
 
         for (let i = 0; i < filtCells.length; i += 1) {
             if (filtCells[i].cell_output.capacity === capacity && filtCells[i].out_point.tx_hash === unlockableAmount.txHash) {
@@ -368,19 +367,19 @@ export class DAOService {
 
     async getStatisticsFromCells(cells: Cell[]): Promise<DAOStatistics> {
         const filtCells = await this.filterDAOCells(cells, DAOCellType.ALL);
-        const statistics: DAOStatistics = { maximumWithdraw: BI.from(0), daoEarliestSince: null };
+        const statistics: DAOStatistics = { maximumWithdraw: BigInt(0), daoEarliestSince: null };
 
         for (let i = 0; i < filtCells.length; i += 1) {
             if (this.isCellDeposit(filtCells[i])) {
                 const maxWithdraw = await this.getDepositCellMaximumWithdraw(filtCells[i]);
-                statistics.maximumWithdraw = statistics.maximumWithdraw.add(maxWithdraw);
+                statistics.maximumWithdraw += maxWithdraw;
                 const earliestSince = await this.getDepositDaoEarliestSince(filtCells[i]);
                 if (!statistics.daoEarliestSince || statistics.daoEarliestSince > earliestSince) {
                     statistics.daoEarliestSince = earliestSince;
                 }
             } else {
                 const maxWithdraw = await this.getWithdrawCellMaximumWithdraw(filtCells[i]);
-                statistics.maximumWithdraw = statistics.maximumWithdraw.add(maxWithdraw);
+                statistics.maximumWithdraw += maxWithdraw;
                 const earliestSince = await this.getWithdrawDaoEarliestSince(filtCells[i]);
                 if (!statistics.daoEarliestSince || statistics.daoEarliestSince > earliestSince) {
                     statistics.daoEarliestSince = earliestSince;
@@ -391,36 +390,36 @@ export class DAOService {
         return statistics;
     }
 
-    async getDepositCellMaximumWithdraw(depositCell: Cell): Promise<BI> {
+    async getDepositCellMaximumWithdraw(depositCell: Cell): Promise<bigint> {
         const depositBlockHeader = await this.connection.getBlockHeaderFromHash(depositCell.block_hash);
         const withdrawBlockHeader = await this.connection.getCurrentBlockHeader();
 
-        return BI.from(dao.calculateMaximumWithdraw(depositCell, depositBlockHeader.dao, withdrawBlockHeader.dao));
+        return dao.calculateMaximumWithdraw(depositCell, depositBlockHeader.dao, withdrawBlockHeader.dao);
     }
 
-    async getWithdrawCellMaximumWithdraw(withdrawCell: Cell): Promise<BI> {
+    async getWithdrawCellMaximumWithdraw(withdrawCell: Cell): Promise<bigint> {
         const withdrawBlockHeader = await this.connection.getBlockHeaderFromHash(withdrawCell.block_hash);
         const { txHash } = await this.findCorrectInputFromWithdrawCell(withdrawCell);
         const depositTransaction = await this.connection.getTransactionFromHash(txHash);
         const depositBlockHeader = await this.connection.getBlockHeaderFromHash(depositTransaction.tx_status.block_hash);
 
-        return BI.from(dao.calculateMaximumWithdraw(withdrawCell, depositBlockHeader.dao, withdrawBlockHeader.dao));
+        return dao.calculateMaximumWithdraw(withdrawCell, depositBlockHeader.dao, withdrawBlockHeader.dao);
     }
 
-    async getDepositDaoEarliestSince(depositCell: Cell): Promise<BI> {
+    async getDepositDaoEarliestSince(depositCell: Cell): Promise<bigint> {
         const depositBlockHeader = await this.connection.getBlockHeaderFromHash(depositCell.block_hash);
         const withdrawBlockHeader = await this.connection.getCurrentBlockHeader();
 
-        return BI.from(dao.calculateDaoEarliestSince(depositBlockHeader.epoch, withdrawBlockHeader.epoch));
+        return dao.calculateDaoEarliestSince(depositBlockHeader.epoch, withdrawBlockHeader.epoch);
     }
 
-    async getWithdrawDaoEarliestSince(withdrawCell: Cell): Promise<BI> {
+    async getWithdrawDaoEarliestSince(withdrawCell: Cell): Promise<bigint> {
         const withdrawBlockHeader = await this.connection.getBlockHeaderFromHash(withdrawCell.block_hash);
         const { txHash } = await this.findCorrectInputFromWithdrawCell(withdrawCell);
         const depositTransaction = await this.connection.getTransactionFromHash(txHash);
         const depositBlockHeader = await this.connection.getBlockHeaderFromHash(depositTransaction.tx_status.block_hash);
 
-        return BI.from(dao.calculateDaoEarliestSince(depositBlockHeader.epoch, withdrawBlockHeader.epoch));
+        return dao.calculateDaoEarliestSince(depositBlockHeader.epoch, withdrawBlockHeader.epoch);
     }
 
     async getUnlockableAmounts(address: string): Promise<DAOUnlockableAmount[]> {
@@ -432,21 +431,21 @@ export class DAOService {
         const unlockableAmounts: DAOUnlockableAmount[] = [];
         const filtCells = await this.filterDAOCells(cells);
 
-        let totalAmount = BI.from(0);
-        let totalCompensation = BI.from(0);
+        let totalAmount = BigInt(0);
+        let totalCompensation = BigInt(0);
         let maxUnlockableDate = new Date();
         let unlockable = true;
 
         for (let i = 0; i < filtCells.length; i += 1) {
             const unlockableAmount: DAOUnlockableAmount = {
-                amount: BI.from(filtCells[i].cell_output.capacity),
-                compensation: BI.from(0),
+                amount: BigInt(filtCells[i].cell_output.capacity),
+                compensation: BigInt(0),
                 unlockable: true,
                 unlockableDate: new Date(),
                 type: "single",
                 txHash: filtCells[i].out_point.tx_hash,
             };
-            let maxWithdraw = BI.from(0);
+            let maxWithdraw = BigInt(0);
             let timestamp: number;
 
             if (this.isCellDeposit(filtCells[i])) {
@@ -461,13 +460,13 @@ export class DAOService {
                 timestamp = parseInt(depositBlockHeader.timestamp, 16);
             }
 
-            unlockableAmount.compensation = maxWithdraw.sub(unlockableAmount.amount);
+            unlockableAmount.compensation = maxWithdraw - unlockableAmount.amount;
             unlockableAmount.unlockableDate = new Date(timestamp + this.unlockMinTime);
             unlockableAmount.unlockable = timestamp + this.unlockMinTime < Date.now();
             unlockableAmounts.push(unlockableAmount);
 
-            totalAmount = totalAmount.add(unlockableAmount.amount);
-            totalCompensation = totalCompensation.add(unlockableAmount.compensation);
+            totalAmount += unlockableAmount.amount;
+            totalCompensation += unlockableAmount.compensation;
             unlockable = unlockable && unlockableAmount.unlockable;
             if (maxUnlockableDate < unlockableAmount.unlockableDate) {
                 maxUnlockableDate = unlockableAmount.unlockableDate;

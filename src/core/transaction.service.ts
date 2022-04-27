@@ -1,5 +1,5 @@
 import { ScriptConfig } from "@ckb-lumos/config-manager";
-import { Cell, commons, hd, Script, utils, BI } from "@ckb-lumos/lumos";
+import { Cell, commons, hd, Script, utils } from "@ckb-lumos/lumos";
 import { sealTransaction, TransactionSkeletonType } from "@ckb-lumos/helpers";
 import { TransactionWithStatus, values, core, WitnessArgs } from "@ckb-lumos/base";
 import { TransactionCollector as TxCollector } from "@ckb-lumos/ckb-indexer";
@@ -72,7 +72,7 @@ export class TransactionService {
     private readonly transactionMap = new Map<string, Transaction>();
     private readonly secpSignaturePlaceholder =
         "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
-    public readonly defaultFee = BI.from(100000);
+    public readonly defaultFee = BigInt(100000);
 
     constructor(connectionService: ConnectionService, nftService: NftService) {
         this.connection = connectionService;
@@ -100,11 +100,11 @@ export class TransactionService {
         return TransactionService.addCellDep(txSkeleton, this.connection.getConfig().SCRIPTS.SECP256K1_BLAKE160);
     }
 
-    injectCapacity(txSkeleton: TransactionSkeletonType, capacity: BI, cells: Cell[]): TransactionSkeletonType {
+    injectCapacity(txSkeleton: TransactionSkeletonType, capacity: bigint, cells: Cell[]): TransactionSkeletonType {
         let lastScript: Script;
         let changeCell: Cell;
-        let changeCapacity = BI.from(0);
-        let currentAmount = BI.from(capacity);
+        let changeCapacity = BigInt(0);
+        let currentAmount = BigInt(capacity);
 
         for (const cell of cells) {
             // Cell is empty
@@ -112,13 +112,13 @@ export class TransactionService {
                 txSkeleton = txSkeleton.update("inputs", (inputs) => inputs.push(cell));
                 txSkeleton = txSkeleton.update("witnesses", (witnesses) => witnesses.push("0x"));
 
-                const inputCapacity = BI.from(cell.cell_output.capacity);
+                const inputCapacity = BigInt(cell.cell_output.capacity);
                 let deductCapacity = inputCapacity;
                 if (deductCapacity > currentAmount) {
                     deductCapacity = currentAmount;
                 }
-                currentAmount = currentAmount.sub(deductCapacity);
-                changeCapacity = changeCapacity.add(inputCapacity.sub(deductCapacity));
+                currentAmount -= deductCapacity;
+                changeCapacity += inputCapacity - deductCapacity;
 
                 const lockScript = cell.cell_output.lock;
                 if (
@@ -132,7 +132,7 @@ export class TransactionService {
                 }
 
                 // Got enough amount
-                if (currentAmount === BI.from(0) && changeCapacity > BI.from(0)) {
+                if (Number(currentAmount) === 0 && Number(changeCapacity) > 0) {
                     changeCell = {
                         cell_output: {
                             capacity: "0x" + changeCapacity.toString(16),
@@ -148,7 +148,7 @@ export class TransactionService {
             }
         }
 
-        if (changeCapacity > BI.from(0)) {
+        if (changeCapacity > BigInt(0)) {
             txSkeleton = txSkeleton.update("outputs", (outputs) => outputs.push(changeCell));
         }
 
