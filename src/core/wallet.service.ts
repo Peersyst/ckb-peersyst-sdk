@@ -276,7 +276,22 @@ export class WalletService {
     }
 
     getTransactions(): Transaction[] {
-        return [...Object.values(this.accountTransactionMap)].flat(1).sort((txa, txb) => txa.blockNumber - txb.blockNumber);
+        const sortedTxs = [...Object.values(this.accountTransactionMap)].flat(1).sort((txa, txb) => txa.blockNumber - txb.blockNumber);
+
+        // Remove equal transactions
+        for (let i = 0; i < sortedTxs.length; i += 1) {
+            let j = i + 1;
+
+            while (j < sortedTxs.length) {
+                if (sortedTxs[i].transactionHash === sortedTxs[j].transactionHash && sortedTxs[i].type === sortedTxs[j].type) {
+                    sortedTxs.splice(j, 1);
+                } else {
+                    j += 1;
+                }
+            }
+        }
+
+        return sortedTxs;
     }
 
     // ---------------------------

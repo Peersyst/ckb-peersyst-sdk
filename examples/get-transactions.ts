@@ -15,6 +15,7 @@ const main = async () => {
 
         const transactions = wallet.getTransactions();
         Logger.info(transactions);
+        Logger.info(transactions.length);
         const addresses = wallet.getAllAddresses();
         Logger.info(addresses);
     } catch (error) {
