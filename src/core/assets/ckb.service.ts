@@ -5,9 +5,9 @@ import { TransactionService, FeeRate } from "../transaction.service";
 import { Cell } from "@ckb-lumos/lumos";
 
 export interface CKBBalance {
-    totalBalance: bigint;
-    occupiedBalance: bigint;
-    freeBalance: bigint;
+    totalBalance: number;
+    occupiedBalance: number;
+    freeBalance: number;
 }
 
 export class CKBService {
@@ -86,16 +86,18 @@ export class CKBService {
     }
 
     getBalanceFromCells(cells: Cell[]): CKBBalance {
-        let totalBalance = BigInt(0);
-        let occupiedBalance = BigInt(0);
+        let totalBalanceBI = BigInt(0);
+        let occupiedBalanceBI = BigInt(0);
 
         for (const cell of cells) {
-            totalBalance += BigInt(cell.cell_output.capacity);
+            totalBalanceBI += BigInt(cell.cell_output.capacity);
             if (cell.cell_output.type) {
-                occupiedBalance += BigInt(cell.cell_output.capacity);
+                occupiedBalanceBI += BigInt(cell.cell_output.capacity);
             }
         }
-        const freeBalance = totalBalance - occupiedBalance;
+        const freeBalance = Number(totalBalanceBI - occupiedBalanceBI) / 10 ** 8;
+        const totalBalance = Number(totalBalanceBI) / 10 ** 8;
+        const occupiedBalance = Number(occupiedBalanceBI) / 10 ** 8;
 
         return { totalBalance, occupiedBalance, freeBalance };
     }

@@ -12,8 +12,8 @@ export interface DAOStatistics {
 }
 
 export interface DAOBalance {
-    daoDeposit: bigint;
-    daoCompensation: bigint;
+    daoDeposit: number;
+    daoCompensation: number;
 }
 
 export interface DAOUnlockableAmount {
@@ -167,7 +167,7 @@ export class DAOService {
             daoCompensation += maxWithdraw - BigInt(cells[i].cell_output.capacity);
         }
 
-        return { daoDeposit, daoCompensation };
+        return { daoDeposit: Number(daoDeposit) / 10 ** 8, daoCompensation: Number(daoCompensation) / 10 ** 8 };
     }
 
     async getBalanceFromCells(cells: Cell[]): Promise<DAOBalance> {
@@ -188,7 +188,7 @@ export class DAOService {
             daoCompensation += maxWithdraw - BigInt(daoCells[i].cell_output.capacity);
         }
 
-        return { daoDeposit, daoCompensation };
+        return { daoDeposit: Number(daoDeposit) / 10 ** 8, daoCompensation: Number(daoCompensation) / 10 ** 8 };
     }
 
     async deposit(amount: bigint, from: string, to: string, privateKey: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
