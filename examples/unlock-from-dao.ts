@@ -13,11 +13,14 @@ const main = async () => {
 
         // We will try to unlock first unlockable amount
         const unlockableAmounts = await wallet.getDAOUnlockableAmounts();
-        if (unlockableAmounts.length === 0) {
-            throw new Error("No unlockable amount. Deposit before trying to withdraw");
+        const currentlyUnlockableAmounts = unlockableAmounts.filter((ua) => ua.unlockable || ua.type === "deposit");
+        if (currentlyUnlockableAmounts.length === 0) {
+            throw new Error("No unlockable or withdrawable amount. Deposit before trying to withdraw");
         }
 
-        const unlockHash = await wallet.withdrawAndUnlock(unlockableAmounts[1], mnemonic);
+        Logger.info("Unlocking the following unlockable amount:");
+        Logger.info(currentlyUnlockableAmounts[0]);
+        const unlockHash = await wallet.withdrawOrUnlock(currentlyUnlockableAmounts[0], mnemonic);
         Logger.info(unlockHash);
 
         // You can view DAO balance with
@@ -25,6 +28,7 @@ const main = async () => {
         Logger.info(daoBalance);
     } catch (error) {
         Logger.error(`${error.name}: ${error.message}`);
+        Logger.error(`${error.stack}`);
     }
 };
 

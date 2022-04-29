@@ -1,7 +1,8 @@
-import { Cell, Script } from "@ckb-lumos/lumos";
+import { Cell, Script } from "@ckb-lumos/base";
+import { since } from "@ckb-lumos/lumos";
 import { TransactionSkeleton, TransactionSkeletonType } from "@ckb-lumos/helpers";
 import { dao, common } from "@ckb-lumos/common-scripts";
-import { ConnectionService } from "../connection.service";
+import { ConnectionService, Environments } from "../connection.service";
 import { FeeRate, TransactionService } from "../transaction.service";
 import { Logger } from "../../utils/logger";
 
@@ -16,11 +17,12 @@ export interface DAOBalance {
 }
 
 export interface DAOUnlockableAmount {
-    type: "total" | "single";
+    type: "deposit" | "withdraw";
     amount: bigint;
     compensation: bigint;
     unlockable: boolean;
-    unlockableDate: Date;
+    remainingCycleMinutes: number;
+    remainingEpochs: number;
     txHash: string;
 }
 
@@ -37,11 +39,17 @@ export class DAOService {
     private readonly daoCellSize = BigInt(102 * 10 ** 8);
     private readonly daoScriptArgs = "0x";
     private readonly depositDaoData = "0x0000000000000000";
-    private readonly unlockMinTime = 30 * 24 * 60 * 60 * 1000; // 30 days in milliseconds
+    private blockTime = 8.02;
 
     constructor(connectionService: ConnectionService, transactionService: TransactionService) {
         this.connection = connectionService;
         this.transactionService = transactionService;
+
+        if (this.connection.getEnvironment() === Environments.Mainnet) {
+            this.blockTime = 11.25;
+        } else {
+            this.blockTime = 7.5;
+        }
     }
 
     private getDAOScript(): Script {
@@ -74,17 +82,21 @@ export class DAOService {
     }
 
     async isCellUnlockable(cell: Cell): Promise<boolean> {
-        let depositBlockHash: string;
+        let sinceBI: bigint;
+        const currentBlockHeader = await this.connection.getCurrentBlockHeader();
+        const currentEpoch = since.parseEpoch(currentBlockHeader.epoch);
 
         if (this.isCellDeposit(cell)) {
-            depositBlockHash = cell.block_hash;
+            sinceBI = await this.getDepositDaoEarliestSince(cell);
         } else {
-            const depositCell = await this.getDepositCellFromWithdrawCell(cell);
-            depositBlockHash = depositCell.block_hash;
+            sinceBI = await this.getWithdrawDaoEarliestSince(cell);
         }
-        const depositHeader = await this.connection.getBlockHeaderFromHash(depositBlockHash);
+        const earliestSince = since.parseAbsoluteEpochSince(sinceBI.toString());
 
-        return parseInt(depositHeader.timestamp, 16) + this.unlockMinTime < Date.now();
+        const unlockable =
+            currentEpoch.number > earliestSince.number ||
+            (currentEpoch.number === earliestSince.number && currentEpoch.index >= earliestSince.index);
+        return unlockable;
     }
 
     async getCells(address: string, cellType: DAOCellType = DAOCellType.ALL): Promise<Cell[]> {
@@ -349,8 +361,10 @@ export class DAOService {
 
     async getWithdrawCellFromCapacityTx(capacity: string, address: string, txHash: string): Promise<Cell> {
         const cells = await this.getCells(address, DAOCellType.WITHDRAW);
+        this.logger.info(`finding cell with capacity ${capacity} address ${address} and txHash ${txHash}`);
 
         for (let i = 0; i < cells.length; i += 1) {
+            this.logger.info(cells[i]);
             if (cells[i].cell_output.capacity === capacity && cells[i].out_point.tx_hash === txHash) {
                 return cells[i];
             }
@@ -386,6 +400,7 @@ export class DAOService {
                 }
             }
         }
+        this.logger.info(since.parseSince("0x20070801d300112e"));
 
         return statistics;
     }
@@ -430,57 +445,58 @@ export class DAOService {
     async getUnlockableAmountsFromCells(cells: Cell[]): Promise<DAOUnlockableAmount[]> {
         const unlockableAmounts: DAOUnlockableAmount[] = [];
         const filtCells = await this.filterDAOCells(cells);
-
-        let totalAmount = BigInt(0);
-        let totalCompensation = BigInt(0);
-        let maxUnlockableDate = new Date();
-        let unlockable = true;
+        const currentBlockHeader = await this.connection.getCurrentBlockHeader();
+        const currentEpoch = since.parseEpoch(currentBlockHeader.epoch);
 
         for (let i = 0; i < filtCells.length; i += 1) {
             const unlockableAmount: DAOUnlockableAmount = {
                 amount: BigInt(filtCells[i].cell_output.capacity),
                 compensation: BigInt(0),
                 unlockable: true,
-                unlockableDate: new Date(),
-                type: "single",
+                remainingCycleMinutes: 0,
+                type: "withdraw",
                 txHash: filtCells[i].out_point.tx_hash,
+                remainingEpochs: 0,
             };
             let maxWithdraw = BigInt(0);
-            let timestamp: number;
+            let earliestSince: since.EpochSinceValue;
 
             if (this.isCellDeposit(filtCells[i])) {
+                unlockableAmount.type = "deposit";
                 maxWithdraw = await this.getDepositCellMaximumWithdraw(filtCells[i]);
-                const blockHeader = await this.connection.getBlockHeaderFromNumber(filtCells[i].block_number);
-                timestamp = parseInt(blockHeader.timestamp, 16);
+                const sinceBI = await this.getDepositDaoEarliestSince(filtCells[i]);
+                earliestSince = since.parseAbsoluteEpochSince(sinceBI.toString());
             } else {
                 maxWithdraw = await this.getWithdrawCellMaximumWithdraw(filtCells[i]);
-                const { txHash } = await this.findCorrectInputFromWithdrawCell(filtCells[i]);
-                const depositTransaction = await this.connection.getTransactionFromHash(txHash);
-                const depositBlockHeader = await this.connection.getBlockHeaderFromHash(depositTransaction.tx_status.block_hash);
-                timestamp = parseInt(depositBlockHeader.timestamp, 16);
+                const sinceBI = await this.getWithdrawDaoEarliestSince(filtCells[i]);
+                earliestSince = since.parseAbsoluteEpochSince(sinceBI.toString());
             }
 
+            const remainingEpochs = earliestSince.number - currentEpoch.number;
             unlockableAmount.compensation = maxWithdraw - unlockableAmount.amount;
-            unlockableAmount.unlockableDate = new Date(timestamp + this.unlockMinTime);
-            unlockableAmount.unlockable = timestamp + this.unlockMinTime < Date.now();
-            unlockableAmounts.push(unlockableAmount);
-
-            totalAmount += unlockableAmount.amount;
-            totalCompensation += unlockableAmount.compensation;
-            unlockable = unlockable && unlockableAmount.unlockable;
-            if (maxUnlockableDate < unlockableAmount.unlockableDate) {
-                maxUnlockableDate = unlockableAmount.unlockableDate;
+            if (remainingEpochs === 0) {
+                unlockableAmount.remainingEpochs = 0;
+                const remainingBlocks = earliestSince.index - currentEpoch.index;
+                if (remainingBlocks <= 0) {
+                    unlockableAmount.remainingCycleMinutes = 0;
+                } else {
+                    unlockableAmount.remainingCycleMinutes = (remainingBlocks * this.blockTime) / 60;
+                }
+            } else if (remainingEpochs < 0) {
+                unlockableAmount.remainingEpochs = 0;
+                unlockableAmount.remainingCycleMinutes = 0;
+            } else {
+                unlockableAmount.remainingEpochs = remainingEpochs;
+                let remainingBlocks = currentEpoch.length - currentEpoch.index;
+                remainingBlocks += (remainingEpochs - 1) * currentEpoch.length;
+                remainingBlocks += earliestSince.index;
+                unlockableAmount.remainingCycleMinutes = (remainingBlocks * this.blockTime) / 60;
             }
+            unlockableAmount.unlockable =
+                currentEpoch.number > earliestSince.number ||
+                (currentEpoch.number === earliestSince.number && currentEpoch.index >= earliestSince.index);
+            unlockableAmounts.push(unlockableAmount);
         }
-
-        unlockableAmounts.push({
-            amount: totalAmount,
-            compensation: totalCompensation,
-            unlockable,
-            unlockableDate: maxUnlockableDate,
-            type: "total",
-            txHash: null,
-        });
 
         return unlockableAmounts;
     }

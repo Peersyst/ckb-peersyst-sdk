@@ -1,11 +1,11 @@
 import { mnemonic, ExtendedPrivateKey, AccountExtendedPublicKey, AddressType } from "@ckb-lumos/hd";
 import { ConnectionService } from "./connection.service";
-import { TransactionService, Transaction, TransactionStatus, FeeRate } from "./transaction.service";
+import { TransactionService, Transaction, FeeRate } from "./transaction.service";
 import { TokenService, TokenAmount } from "./assets/token.service";
 import { CKBBalance, CKBService } from "./assets/ckb.service";
 import { DAOBalance, DAOService, DAOStatistics, DAOUnlockableAmount } from "./dao/dao.service";
 import { Cell, Script } from "@ckb-lumos/lumos";
-import { TransactionWithStatus, QueryOptions } from "@ckb-lumos/base";
+import { QueryOptions } from "@ckb-lumos/base";
 import { Nft, NftService } from "./assets/nft.service";
 import { Logger } from "../utils/logger";
 
@@ -42,7 +42,6 @@ export interface WalletState {
     accountTransactionMap: transactionMapI;
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export class WalletService {
     private readonly connection: ConnectionService;
     private readonly transactionService: TransactionService;
@@ -389,57 +388,36 @@ export class WalletService {
         return this.daoService.depositMultiAccount(amount, this.getCells(), addresses, this.getNextAddress(), privateKeys, feeRate);
     }
 
-    async withdrawAndUnlockFromCell(cell: Cell, mnemo: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
-        await this.synchronize();
+    async withdrawOrUnlockFromCell(cell: Cell, mnemo: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivKeyFromLock(mnemo, cell.cell_output.lock);
         const feeAddresses = this.getAllAddresses();
         const privateKeys = this.getAllPrivateKeys(mnemo);
         const to = this.getNextAddress();
+
         if (!this.daoService.isCellDeposit(cell)) {
-            this.logger.warn("Cell already withrawed. Unlocking...");
+            this.logger.info("Unlocking withdraw cell");
+
+            // Check real unlockability
+            if (!(await this.daoService.isCellUnlockable(cell))) {
+                throw new Error("Cell can not yet be unlocked.");
+            }
             return this.daoService.unlock(cell, privateKey, address, to, feeAddresses, privateKeys, feeRate);
         }
-        if (!(await this.daoService.isCellUnlockable(cell))) {
-            throw new Error("Cell can not be unlocked. Minimum time is 30 days.");
-        }
 
-        const withdrawTxHash = await this.daoService.withdraw(cell, privateKey, feeAddresses, privateKeys, feeRate);
-        let commited = false;
-        let transaction: TransactionWithStatus;
-
-        // Should be done in a queue
-        while (!commited) {
-            transaction = await this.connection.getTransactionFromHash(withdrawTxHash, false);
-            commited = transaction.tx_status.block_hash && transaction.tx_status.status === TransactionStatus.COMMITTED;
-
-            if (!commited) {
-                await sleep(1000);
-            }
-        }
-
-        // Search new withdraw cell to unlock
-        const withdrawCell = await this.daoService.getWithdrawCellFromCapacityTx(cell.cell_output.capacity, address, withdrawTxHash);
-        return this.daoService.unlock(withdrawCell, privateKey, address, to, feeAddresses, privateKeys, feeRate);
+        this.logger.info("Withdrawing deposit cell");
+        return this.daoService.withdraw(cell, privateKey, feeAddresses, privateKeys, feeRate);
     }
 
-    async withdrawAndUnlock(unlockableAmount: DAOUnlockableAmount, mnemo: string): Promise<string> {
+    async withdrawOrUnlock(unlockableAmount: DAOUnlockableAmount, mnemo: string): Promise<string> {
         await this.synchronize();
         const cells = await this.daoService.filterDAOCells(this.getCells());
 
-        if (unlockableAmount.type === "total") {
-            for (let i = 0; i < cells.length; i += 1) {
-                try {
-                    await this.withdrawAndUnlockFromCell(cells[i], mnemo);
-                } catch (err) {
-                    this.logger.error(`Can not withdraw and unlock cell: ${cells[i]}\n\tError:${err.toString()}`);
-                }
-            }
-
-            return "All amount unlocked sucessfully";
-        }
-
         const cell = await this.daoService.findCellFromUnlockableAmountAndCells(unlockableAmount, cells);
-        return this.withdrawAndUnlockFromCell(cell, mnemo);
+        if (!cell) {
+            throw new Error("Cell related to unlockable amount not found!");
+        }
+        this.logger.info(cell);
+        return this.withdrawOrUnlockFromCell(cell, mnemo);
     }
 
     async getDAOStatisticsFromAccount(accountId = 0): Promise<DAOStatistics> {
@@ -466,6 +444,7 @@ export class WalletService {
     }
 
     async getDAOUnlockableAmounts(): Promise<DAOUnlockableAmount[]> {
+        await this.synchronize();
         return this.daoService.getUnlockableAmountsFromCells(this.getCells());
     }
 }

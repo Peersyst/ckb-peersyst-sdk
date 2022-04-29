@@ -108,6 +108,10 @@ export class ConnectionService {
         return this.rpc;
     }
 
+    getEnvironment(): Environments {
+        return this.env;
+    }
+
     getIndexer(): IndexerType {
         return this.indexer;
     }
