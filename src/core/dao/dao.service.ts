@@ -280,7 +280,7 @@ export class DAOService {
     ): Promise<string> {
         let txSkeleton = TransactionSkeleton({ cellProvider: this.connection.getEmptyCellProvider() });
         const depositCell = await this.getDepositCellFromWithdrawCell(withdrawCell);
-        if (!(await this.isCellUnlockable(depositCell))) {
+        if (!(await this.isCellUnlockable(withdrawCell))) {
             throw new Error("Cell can not be unlocked. Minimum time is 30 days.");
         }
 
