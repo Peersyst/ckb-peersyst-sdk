@@ -13,7 +13,6 @@
         "test": "jest --passWithNoTests --detectOpenHandles",
         "test:coverage": "jest --coverage --passWithNoTests"
     },
-    "private": true,
     "files": [
         "dist"
     ],
