@@ -7,6 +7,7 @@
     "scripts": {
         "build": "tsc",
         "prepare": "npm run build",
+        "postinstall": "npm run build",
         "start": "ts-node src/index.ts",
         "example": "ts-node examples/$npm_config_name.ts",
         "lint": "eslint . --ext .ts,.json",
@@ -14,7 +15,10 @@
         "test:coverage": "jest --coverage --passWithNoTests"
     },
     "files": [
-        "dist"
+        "dist/src/",
+        "dist/index.d.ts",
+        "dist/index.js",
+        "dist/index.js.map"
     ],
     "repository": {
         "type": "git",
