@@ -210,10 +210,17 @@ export class TransactionService {
         return signingPrivKeys;
     }
 
-    async lockScriptHasTransactions(lockScript: Script): Promise<boolean> {
+    async lockScriptHasTransactions(lockScript: Script, toBlock?: string, fromBlock?: string): Promise<boolean> {
+        const queryOptions: CKBIndexerQueryOptions = { lock: lockScript };
+        if (toBlock) {
+            queryOptions.toBlock = toBlock;
+        }
+        if (fromBlock) {
+            queryOptions.fromBlock = fromBlock;
+        }
         const transactionCollector = new this.TransactionCollector(
             this.connection.getIndexer(),
-            { lock: lockScript },
+            queryOptions,
             this.connection.getCKBUrl(),
             { includeStatus: false },
         );
@@ -222,8 +229,9 @@ export class TransactionService {
         return txs > 0;
     }
 
-    async getTransactions(address: string, toBlock?: string, fromBlock?: string): Promise<Transaction[]> {
-        const queryOptions: CKBIndexerQueryOptions = { lock: this.connection.getLockFromAddress(address) };
+    async getTransactions(address: string, allAddresses: string[], toBlock?: string, fromBlock?: string): Promise<Transaction[]> {
+        const lock = this.connection.getLockFromAddress(address);
+        const queryOptions: CKBIndexerQueryOptions = { lock };
         if (toBlock) {
             queryOptions.toBlock = toBlock;
         }
@@ -241,38 +249,65 @@ export class TransactionService {
         const transactions: Transaction[] = [];
         let cell: TransactionWithStatus;
         for await (cell of transactionCollector.collect()) {
-            if (!this.transactionMap.has(cell.transaction.hash)) {
+            const key = `${address}-${cell.transaction.hash}`;
+            if (!this.transactionMap.has(key)) {
                 const header = await this.connection.getBlockHeaderFromHash(cell.tx_status.block_hash);
-                let hasDAOInput = false;
-
                 const inputs: DataRow[] = [];
+                const inputAddresses: string[] = [];
+                let scriptType: ScriptType;
+                let inputIndex = null;
+                let amount = 0;
+                let complexAmount = 0;
+                let inputType = null;
+                let isRealSender = false;
+
                 for (let i = 0; i < cell.transaction.inputs.length; i += 1) {
                     const input = cell.transaction.inputs[i];
                     const transaction = await this.connection.getTransactionFromHash(input.previous_output.tx_hash);
                     const output = transaction.transaction.outputs[parseInt(input.previous_output.index, 16)];
-                    inputs.push({
-                        quantity: parseInt(output.capacity, 16) / 100000000,
-                        address: this.connection.getAddressFromLock(output.lock),
-                    });
-                    if (output.type) {
-                        const script: ScriptType = {
-                            codeHash: output.type.code_hash,
-                            hashType: output.type.hash_type,
-                            args: output.type.args,
-                        };
-                        if (TransactionService.isScriptTypeScript(script, this.connection.getConfig().SCRIPTS.DAO)) {
-                            hasDAOInput = true;
+                    const inputAddress = this.connection.getAddressFromLock(output.lock);
+                    if (allAddresses.includes(inputAddress)) {
+                        inputIndex = i;
+                        amount -= parseInt(output.capacity, 16) / 100000000;
+                        complexAmount -= parseInt(output.capacity, 16) / 100000000;
+                        inputAddresses.push(inputAddress);
+                        if (output.type) {
+                            inputType = output.type;
                         }
                     }
+                    if (address === inputAddress) {
+                        isRealSender = true;
+                    }
+                    inputs.push({
+                        quantity: parseInt(output.capacity, 16) / 100000000,
+                        address: inputAddress,
+                    });
                 }
 
-                const outputs: DataRow[] = cell.transaction.outputs.map((output) => ({
-                    quantity: parseInt(output.capacity, 16) / 100000000,
-                    address: this.connection.getAddressFromLock(output.lock),
-                    type: output.type
-                        ? { args: output.type.args, codeHash: output.type.code_hash, hashType: output.type.hash_type }
-                        : undefined,
-                }));
+                let outputIndex = null;
+                let receiveAmount = 0;
+                const outputs: DataRow[] = cell.transaction.outputs.map((output, index) => {
+                    const outputAddress = this.connection.getAddressFromLock(output.lock);
+                    if (allAddresses.includes(outputAddress)) {
+                        amount += parseInt(output.capacity, 16) / 100000000;
+                        if (output.type) {
+                            outputIndex = index;
+                        }
+                    }
+                    if (inputAddresses.includes(outputAddress)) {
+                        complexAmount += parseInt(output.capacity, 16) / 100000000;
+                    }
+                    if (address === outputAddress) {
+                        receiveAmount = parseInt(output.capacity, 16) / 100000000;
+                    }
+                    return {
+                        quantity: parseInt(output.capacity, 16) / 100000000,
+                        address: this.connection.getAddressFromLock(output.lock),
+                        type: output.type
+                            ? { args: output.type.args, codeHash: output.type.code_hash, hashType: output.type.hash_type }
+                            : undefined,
+                    };
+                });
                 cell.transaction.outputs_data.map((data, index) => {
                     if (data !== "0x") {
                         if (data.length === 34) {
@@ -283,34 +318,46 @@ export class TransactionService {
                     }
                 });
 
-                let amount = 0;
                 let type: TransactionType;
-                let scriptType: ScriptType;
-                if (outputs[0] && cell.transaction.outputs[0]) {
-                    amount = outputs[0].quantity;
-                    const isReceive = outputs[0].address === address;
-
-                    if (!outputs[0].type) {
-                        if (hasDAOInput) {
-                            type = TransactionType.UNLOCK_DAO;
+                const isReceive = inputIndex === null;
+                if (inputType === null && outputIndex === null) {
+                    // If neither input or output has type then it is a simple ckb transaction
+                    if (Math.abs(amount) < 1) {
+                        // It is fee, same receiver and sender
+                        if (isRealSender) {
+                            type = TransactionType.SEND_CKB;
+                            amount = complexAmount;
                         } else {
-                            type = !isReceive ? TransactionType.SEND_CKB : TransactionType.RECEIVE_CKB;
+                            type = TransactionType.RECEIVE_CKB;
+                            amount = receiveAmount;
                         }
                     } else {
-                        scriptType = outputs[0].type;
-                        if (TransactionService.isScriptTypeScript(outputs[0].type, this.connection.getConfig().SCRIPTS.SUDT)) {
-                            type = !isReceive ? TransactionType.SEND_TOKEN : TransactionType.RECEIVE_TOKEN;
-                        } else if (TransactionService.isScriptTypeScript(outputs[0].type, this.connection.getConfig().SCRIPTS.DAO)) {
-                            type = outputs[0].data === 0 ? TransactionType.DEPOSIT_DAO : TransactionType.WITHDRAW_DAO;
-                        } else if (await this.nftService.isScriptNftScript(outputs[0].type)) {
-                            type = !isReceive ? TransactionType.SEND_NFT : TransactionType.RECEIVE_NFT;
-                        } else {
-                            type = !isReceive ? TransactionType.SMART_CONTRACT_SEND : TransactionType.SMART_CONTRACT_RECEIVE;
-                        }
+                        type = !isReceive ? TransactionType.SEND_CKB : TransactionType.RECEIVE_CKB;
                     }
+                } else if (outputIndex !== null) {
+                    const { type: outputType, data, quantity } = outputs[outputIndex];
+                    scriptType = outputType;
+                    if (TransactionService.isScriptTypeScript(outputType, this.connection.getConfig().SCRIPTS.SUDT)) {
+                        type = !isReceive ? TransactionType.SEND_TOKEN : TransactionType.RECEIVE_TOKEN;
+                    } else if (TransactionService.isScriptTypeScript(outputType, this.connection.getConfig().SCRIPTS.DAO)) {
+                        if (data === 0) {
+                            type = TransactionType.DEPOSIT_DAO;
+                            amount = Math.abs(amount) < 1 ? -quantity : amount;
+                        } else {
+                            type = TransactionType.WITHDRAW_DAO;
+                            amount = Math.abs(amount) < 1 ? quantity : amount;
+                        }
+                    } else if (await this.nftService.isScriptNftScript(outputType)) {
+                        type = !isReceive ? TransactionType.SEND_NFT : TransactionType.RECEIVE_NFT;
+                    } else {
+                        type = !isReceive ? TransactionType.SMART_CONTRACT_SEND : TransactionType.SMART_CONTRACT_RECEIVE;
+                    }
+                } else {
+                    scriptType = inputType;
+                    type = TransactionType.UNLOCK_DAO;
                 }
 
-                this.transactionMap.set(cell.transaction.hash, {
+                this.transactionMap.set(key, {
                     status: cell.tx_status.status as TransactionStatus,
                     transactionHash: cell.transaction.hash,
                     inputs,
@@ -324,7 +371,7 @@ export class TransactionService {
                 });
             }
 
-            const transaction = this.transactionMap.get(cell.transaction.hash);
+            const transaction = this.transactionMap.get(key);
             if (!transactions.includes(transaction)) {
                 transactions.push(transaction);
             }
