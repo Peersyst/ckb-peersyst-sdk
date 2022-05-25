@@ -32,9 +32,9 @@ export interface Transaction {
     type: TransactionType;
     scriptType?: ScriptType;
     amount: number;
-    blockHash: string;
-    blockNumber: number;
-    timestamp: Date;
+    blockHash?: string;
+    blockNumber?: number;
+    timestamp?: Date;
 }
 
 export enum TransactionStatus {
@@ -96,12 +96,152 @@ export class TransactionService {
         return scriptConfig.CODE_HASH === scriptType.codeHash && scriptConfig.HASH_TYPE === scriptType.hashType;
     }
 
+    private getTransactionCollector(address: string, includeStatus = false, toBlock?: string, fromBlock?: string): any {
+        const queryOptions: CKBIndexerQueryOptions = { lock: this.connection.getLockFromAddress(address) };
+        if (toBlock) {
+            queryOptions.toBlock = toBlock;
+        }
+        if (fromBlock) {
+            queryOptions.fromBlock = fromBlock;
+        }
+
+        return new this.TransactionCollector(this.connection.getIndexer(), queryOptions, this.connection.getCKBUrl(), { includeStatus });
+    }
+
+    async getTransactionFromLumosTx(lumosTx: TransactionWithStatus, address: string, allAddresses: string[]): Promise<Transaction> {
+        const inputs: DataRow[] = [];
+        const inputAddresses: string[] = [];
+        let scriptType: ScriptType;
+        let inputIndex = null;
+        let amount = 0;
+        let complexAmount = 0;
+        let inputType = null;
+        let isRealSender = false;
+        for (let i = 0; i < lumosTx.transaction.inputs.length; i += 1) {
+            const input = lumosTx.transaction.inputs[i];
+            const transaction = await this.connection.getTransactionFromHash(input.previous_output.tx_hash);
+            const output = transaction.transaction.outputs[parseInt(input.previous_output.index, 16)];
+            const inputAddress = this.connection.getAddressFromLock(output.lock);
+            inputs.push({
+                quantity: parseInt(output.capacity, 16) / 100000000,
+                address: this.connection.getAddressFromLock(output.lock),
+            });
+            if (allAddresses.includes(inputAddress)) {
+                inputIndex = i;
+                amount -= parseInt(output.capacity, 16) / 100000000;
+                complexAmount -= parseInt(output.capacity, 16) / 100000000;
+                inputAddresses.push(inputAddress);
+                if (output.type) {
+                    inputType = {
+                        args: output.type.args,
+                        codeHash: output.type.code_hash,
+                        hashType: output.type.hash_type,
+                    };
+                }
+            }
+            if (address === inputAddress) {
+                isRealSender = true;
+            }
+        }
+
+        let outputIndex = null;
+        let receiveAmount = 0;
+        const outputs: DataRow[] = lumosTx.transaction.outputs.map((output, index) => {
+            const outputAddress = this.connection.getAddressFromLock(output.lock);
+            if (allAddresses.includes(outputAddress)) {
+                amount += parseInt(output.capacity, 16) / 100000000;
+                if (output.type) {
+                    outputIndex = index;
+                }
+            }
+            if (inputAddresses.includes(outputAddress)) {
+                complexAmount += parseInt(output.capacity, 16) / 100000000;
+            }
+            if (address === outputAddress) {
+                receiveAmount = parseInt(output.capacity, 16) / 100000000;
+            }
+            return {
+                quantity: parseInt(output.capacity, 16) / 100000000,
+                address: this.connection.getAddressFromLock(output.lock),
+                type: output.type
+                    ? { args: output.type.args, codeHash: output.type.code_hash, hashType: output.type.hash_type }
+                    : undefined,
+            };
+        });
+        lumosTx.transaction.outputs_data.map((data, index) => {
+            if (data !== "0x") {
+                if (data.length === 34) {
+                    outputs[index].data = Number(utils.readBigUInt128LE(data));
+                } else if (data.length === 18) {
+                    outputs[index].data = Number(utils.readBigUInt64LE(data));
+                }
+            }
+        });
+
+        let type: TransactionType;
+        const isReceive = inputIndex === null;
+        if (inputType === null && outputIndex === null) {
+            // If neither input or output has type then it is a simple ckb transaction
+            if (Math.abs(amount) < 1) {
+                // It is fee, same receiver and sender
+                if (isRealSender) {
+                    type = TransactionType.SEND_CKB;
+                    amount = complexAmount;
+                } else {
+                    type = TransactionType.RECEIVE_CKB;
+                    amount = receiveAmount;
+                }
+            } else {
+                type = !isReceive ? TransactionType.SEND_CKB : TransactionType.RECEIVE_CKB;
+            }
+        } else if (outputIndex !== null) {
+            const { type: outputType, data, quantity } = outputs[outputIndex];
+            scriptType = outputType;
+            if (TransactionService.isScriptTypeScript(scriptType, this.connection.getConfig().SCRIPTS.SUDT)) {
+                type = !isReceive ? TransactionType.SEND_TOKEN : TransactionType.RECEIVE_TOKEN;
+            } else if (TransactionService.isScriptTypeScript(scriptType, this.connection.getConfig().SCRIPTS.DAO)) {
+                if (data === 0) {
+                    type = TransactionType.DEPOSIT_DAO;
+                    amount = Math.abs(amount) < 1 ? -quantity : amount;
+                } else {
+                    type = TransactionType.WITHDRAW_DAO;
+                    amount = Math.abs(amount) < 1 ? quantity : amount;
+                }
+            } else if (await this.nftService.isScriptNftScript(scriptType)) {
+                type = !isReceive ? TransactionType.SEND_NFT : TransactionType.RECEIVE_NFT;
+            } else {
+                type = !isReceive ? TransactionType.SMART_CONTRACT_SEND : TransactionType.SMART_CONTRACT_RECEIVE;
+            }
+        } else {
+            scriptType = inputType;
+            type = TransactionType.UNLOCK_DAO;
+        }
+
+        const transaction: Transaction = {
+            status: lumosTx.tx_status.status as TransactionStatus,
+            transactionHash: lumosTx.transaction.hash,
+            inputs,
+            outputs,
+            type: type,
+            scriptType: scriptType,
+            amount,
+        };
+        if (lumosTx.tx_status.block_hash) {
+            const header = await this.connection.getBlockHeaderFromHash(lumosTx.tx_status.block_hash);
+            transaction.blockHash = lumosTx.tx_status.block_hash;
+            transaction.blockNumber = parseInt(header.number, 16);
+            transaction.timestamp = new Date(parseInt(header.timestamp, 16));
+        }
+
+        return transaction;
+    }
+
     addSecp256CellDep(txSkeleton: TransactionSkeletonType): TransactionSkeletonType {
         return TransactionService.addCellDep(txSkeleton, this.connection.getConfig().SCRIPTS.SECP256K1_BLAKE160);
     }
 
     injectCapacity(txSkeleton: TransactionSkeletonType, capacity: bigint, cells: Cell[]): TransactionSkeletonType {
-        let lastScript: Script;
+        let lastScript: Script | undefined;
         let changeCell: Cell;
         let changeCapacity = BigInt(0);
         let currentAmount = BigInt(capacity);
@@ -210,165 +350,34 @@ export class TransactionService {
         return signingPrivKeys;
     }
 
-    async lockScriptHasTransactions(lockScript: Script, toBlock?: string, fromBlock?: string): Promise<boolean> {
-        const queryOptions: CKBIndexerQueryOptions = { lock: lockScript };
-        if (toBlock) {
-            queryOptions.toBlock = toBlock;
-        }
-        if (fromBlock) {
-            queryOptions.fromBlock = fromBlock;
-        }
-        const transactionCollector = new this.TransactionCollector(
-            this.connection.getIndexer(),
-            queryOptions,
-            this.connection.getCKBUrl(),
-            { includeStatus: false },
-        );
+    async addressHasTransactions(address: string, toBlock?: string, fromBlock?: string): Promise<boolean> {
+        const transactionCollector = this.getTransactionCollector(address, false, toBlock, fromBlock);
 
         const txs = await transactionCollector.count();
         return txs > 0;
     }
 
+    async getLumosTransactions(address: string, toBlock?: string, fromBlock?: string): Promise<TransactionWithStatus[]> {
+        const transactionCollector = this.getTransactionCollector(address, true, toBlock, fromBlock);
+        const transactions: TransactionWithStatus[] = [];
+
+        for await (const lumosTx of transactionCollector.collect()) {
+            transactions.push(lumosTx);
+        }
+
+        return transactions;
+    }
+
     async getTransactions(address: string, allAddresses: string[], toBlock?: string, fromBlock?: string): Promise<Transaction[]> {
-        const lock = this.connection.getLockFromAddress(address);
-        const queryOptions: CKBIndexerQueryOptions = { lock };
-        if (toBlock) {
-            queryOptions.toBlock = toBlock;
-        }
-        if (fromBlock) {
-            queryOptions.fromBlock = fromBlock;
-        }
-
-        const transactionCollector = new this.TransactionCollector(
-            this.connection.getIndexer(),
-            queryOptions,
-            this.connection.getCKBUrl(),
-            { includeStatus: true },
-        );
-
+        const transactionCollector = this.getTransactionCollector(address, true, toBlock, fromBlock);
         const transactions: Transaction[] = [];
-        let cell: TransactionWithStatus;
-        for await (cell of transactionCollector.collect()) {
-            const key = `${address}-${cell.transaction.hash}`;
+        let lumosTx: TransactionWithStatus;
+
+        for await (lumosTx of transactionCollector.collect()) {
+            const key = `${address}-${lumosTx.transaction.hash}`;
             if (!this.transactionMap.has(key)) {
-                const header = await this.connection.getBlockHeaderFromHash(cell.tx_status.block_hash);
-                const inputs: DataRow[] = [];
-                const inputAddresses: string[] = [];
-                let scriptType: ScriptType;
-                let inputIndex = null;
-                let amount = 0;
-                let complexAmount = 0;
-                let inputType = null;
-                let isRealSender = false;
-
-                for (let i = 0; i < cell.transaction.inputs.length; i += 1) {
-                    const input = cell.transaction.inputs[i];
-                    const transaction = await this.connection.getTransactionFromHash(input.previous_output.tx_hash);
-                    const output = transaction.transaction.outputs[parseInt(input.previous_output.index, 16)];
-                    const inputAddress = this.connection.getAddressFromLock(output.lock);
-                    if (allAddresses.includes(inputAddress)) {
-                        inputIndex = i;
-                        amount -= parseInt(output.capacity, 16) / 100000000;
-                        complexAmount -= parseInt(output.capacity, 16) / 100000000;
-                        inputAddresses.push(inputAddress);
-                        if (output.type) {
-                            inputType = output.type;
-                        }
-                    }
-                    if (address === inputAddress) {
-                        isRealSender = true;
-                    }
-                    inputs.push({
-                        quantity: parseInt(output.capacity, 16) / 100000000,
-                        address: inputAddress,
-                    });
-                }
-
-                let outputIndex = null;
-                let receiveAmount = 0;
-                const outputs: DataRow[] = cell.transaction.outputs.map((output, index) => {
-                    const outputAddress = this.connection.getAddressFromLock(output.lock);
-                    if (allAddresses.includes(outputAddress)) {
-                        amount += parseInt(output.capacity, 16) / 100000000;
-                        if (output.type) {
-                            outputIndex = index;
-                        }
-                    }
-                    if (inputAddresses.includes(outputAddress)) {
-                        complexAmount += parseInt(output.capacity, 16) / 100000000;
-                    }
-                    if (address === outputAddress) {
-                        receiveAmount = parseInt(output.capacity, 16) / 100000000;
-                    }
-                    return {
-                        quantity: parseInt(output.capacity, 16) / 100000000,
-                        address: this.connection.getAddressFromLock(output.lock),
-                        type: output.type
-                            ? { args: output.type.args, codeHash: output.type.code_hash, hashType: output.type.hash_type }
-                            : undefined,
-                    };
-                });
-                cell.transaction.outputs_data.map((data, index) => {
-                    if (data !== "0x") {
-                        if (data.length === 34) {
-                            outputs[index].data = Number(utils.readBigUInt128LE(data));
-                        } else if (data.length === 18) {
-                            outputs[index].data = Number(utils.readBigUInt64LE(data));
-                        }
-                    }
-                });
-
-                let type: TransactionType;
-                const isReceive = inputIndex === null;
-                if (inputType === null && outputIndex === null) {
-                    // If neither input or output has type then it is a simple ckb transaction
-                    if (Math.abs(amount) < 1) {
-                        // It is fee, same receiver and sender
-                        if (isRealSender) {
-                            type = TransactionType.SEND_CKB;
-                            amount = complexAmount;
-                        } else {
-                            type = TransactionType.RECEIVE_CKB;
-                            amount = receiveAmount;
-                        }
-                    } else {
-                        type = !isReceive ? TransactionType.SEND_CKB : TransactionType.RECEIVE_CKB;
-                    }
-                } else if (outputIndex !== null) {
-                    const { type: outputType, data, quantity } = outputs[outputIndex];
-                    scriptType = outputType;
-                    if (TransactionService.isScriptTypeScript(outputType, this.connection.getConfig().SCRIPTS.SUDT)) {
-                        type = !isReceive ? TransactionType.SEND_TOKEN : TransactionType.RECEIVE_TOKEN;
-                    } else if (TransactionService.isScriptTypeScript(outputType, this.connection.getConfig().SCRIPTS.DAO)) {
-                        if (data === 0) {
-                            type = TransactionType.DEPOSIT_DAO;
-                            amount = Math.abs(amount) < 1 ? -quantity : amount;
-                        } else {
-                            type = TransactionType.WITHDRAW_DAO;
-                            amount = Math.abs(amount) < 1 ? quantity : amount;
-                        }
-                    } else if (await this.nftService.isScriptNftScript(outputType)) {
-                        type = !isReceive ? TransactionType.SEND_NFT : TransactionType.RECEIVE_NFT;
-                    } else {
-                        type = !isReceive ? TransactionType.SMART_CONTRACT_SEND : TransactionType.SMART_CONTRACT_RECEIVE;
-                    }
-                } else {
-                    scriptType = inputType;
-                    type = TransactionType.UNLOCK_DAO;
-                }
-
-                this.transactionMap.set(key, {
-                    status: cell.tx_status.status as TransactionStatus,
-                    transactionHash: cell.transaction.hash,
-                    inputs,
-                    outputs,
-                    blockHash: cell.tx_status.block_hash,
-                    blockNumber: parseInt(header.number, 16),
-                    type,
-                    scriptType,
-                    amount,
-                    timestamp: new Date(parseInt(header.timestamp, 16)),
-                });
+                const transaction = await this.getTransactionFromLumosTx(lumosTx, address, allAddresses);
+                this.transactionMap.set(key, transaction);
             }
 
             const transaction = this.transactionMap.get(key);
@@ -378,6 +387,11 @@ export class TransactionService {
         }
 
         return transactions;
+    }
+
+    async getTransactionFromHash(txHash: string, addresses: string[]): Promise<Transaction> {
+        const transaction = await this.connection.getTransactionFromHash(txHash, false);
+        return this.getTransactionFromLumosTx(transaction, addresses[addresses.length - 1], addresses);
     }
 
     async signTransaction(txSkeleton: TransactionSkeletonType, privateKeys: string[]): Promise<string> {
@@ -393,6 +407,7 @@ export class TransactionService {
             signatures.push(hd.key.signRecoverable(entry.message, privateKeys[i]));
         }
         const tx = sealTransaction(txSkeletonWEntries, signatures);
+        console.log(JSON.stringify(tx, null, 2));
         const hash = await this.connection.getRPC().send_transaction(tx, "passthrough");
 
         return hash;

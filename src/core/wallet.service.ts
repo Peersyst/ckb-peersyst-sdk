@@ -1,4 +1,5 @@
 import { mnemonic, ExtendedPrivateKey, AccountExtendedPublicKey, AddressType } from "@ckb-lumos/hd";
+import { TransactionWithStatus } from "@ckb-lumos/base";
 import { ConnectionService } from "./connection.service";
 import { TransactionService, Transaction, FeeRate } from "./transaction.service";
 import { TokenService, TokenAmount } from "./assets/token.service";
@@ -55,16 +56,19 @@ export class WalletService {
     private addressMap: addressMapI = {};
     private firstRIndexWithoutTxs = 0;
     private firstCIndexWithoutTxs = 0;
-    private lastHashBlock: string;
+    private lastHashBlock!: string;
     private accountCellsMap: cellMapI = {};
     private accountTransactionMap: transactionMapI = {};
-    private onSync: (walletState: WalletState) => Promise<void>;
+    private onSync!: (walletState: WalletState) => Promise<void>;
+    private onSyncStart!: () => void;
+    private synchronizing = false;
 
     constructor(
         connectionService: ConnectionService,
         mnemo: string,
         walletState?: WalletState,
         onSync?: (walletState: WalletState) => Promise<void>,
+        onSyncStart?: () => void,
     ) {
         if (!WalletService.validateMnemonic(mnemo)) {
             this.logger.error("Invalid Mnemonic");
@@ -91,6 +95,9 @@ export class WalletService {
 
         if (onSync) {
             this.onSync = onSync;
+        }
+        if (onSyncStart) {
+            this.onSyncStart = onSyncStart;
         }
 
         this.accountPublicKey = WalletService.getPrivateKeyFromMnemonic(mnemo).toAccountExtendedPublicKey();
@@ -124,6 +131,9 @@ export class WalletService {
     }
 
     async synchronize(): Promise<WalletState> {
+        if (this.synchronizing) return this.getWalletState();
+        this.synchronizing = true;
+        if (this.onSyncStart) this.onSyncStart();
         let toBlock: string;
         let fromBlock: string;
         const currentBlock = await this.connection.getCurrentBlockHeader();
@@ -136,22 +146,29 @@ export class WalletService {
         }
 
         const cellProvider = this.connection.getCellProvider({ toBlock });
-
         const addressTypes: AddressType[] = [AddressType.Receiving, AddressType.Change];
+        const keysArr: string[] = [];
+        const addressesArr: string[] = [];
+        const lumosTxsArr: TransactionWithStatus[][] = [];
+
         for (const addressType of addressTypes) {
             let currentIndex = 0;
             let firstIndex = addressType === AddressType.Receiving ? this.firstRIndexWithoutTxs : this.firstCIndexWithoutTxs;
 
             while (currentIndex <= firstIndex) {
-                const lock = this.getLock(currentIndex, addressType as AddressType);
-                const hasTransactions = await this.transactionService.lockScriptHasTransactions(lock);
+                const address = this.getAddress(currentIndex, addressType as AddressType);
+                const lumosTxs = await this.transactionService.getLumosTransactions(address, toBlock, fromBlock);
 
-                if (hasTransactions) {
+                if (lumosTxs.length > 0) {
+                    const lock = this.getLock(currentIndex, addressType as AddressType);
                     const mapKey = `${addressType}-${currentIndex}`;
+                    keysArr.push(mapKey);
+                    addressesArr.push(address);
+                    lumosTxsArr.push(lumosTxs);
 
                     // Update cells
                     const newCells: Cell[] = [];
-                    const collectorOptions: QueryOptions = { lock: this.getLock(currentIndex, addressType as AddressType), toBlock };
+                    const collectorOptions: QueryOptions = { lock, toBlock };
                     const cellCollector = cellProvider.collector(collectorOptions);
                     for await (const cell of cellCollector.collect()) {
                         newCells.push(cell);
@@ -173,18 +190,14 @@ export class WalletService {
         }
 
         const allAddresses = this.getAllAddresses();
-        for (const addressType of addressTypes) {
-            const firstIndex = addressType === AddressType.Receiving ? this.firstRIndexWithoutTxs : this.firstCIndexWithoutTxs;
+        for (let i = 0; i < keysArr.length && i < lumosTxsArr.length && i < addressesArr.length; i += 1) {
+            const address = addressesArr[i];
+            const promises = lumosTxsArr[i].map((tx) => this.transactionService.getTransactionFromLumosTx(tx, address, allAddresses));
+            const transactions = await Promise.all(promises);
 
-            for (let i = 0; i < firstIndex; i += 1) {
-                const mapKey = `${addressType}-${i}`;
-                const address = this.getAddress(i, addressType as AddressType);
-                const transactions = await this.transactionService.getTransactions(address, allAddresses, toBlock, fromBlock);
-
-                // Update transactions
-                const currentTxs: Transaction[] = this.accountTransactionMap[mapKey] || [];
-                this.accountTransactionMap[mapKey] = [...currentTxs, ...transactions];
-            }
+            // Update transactions
+            const currentTxs: Transaction[] = this.accountTransactionMap[keysArr[i]] || [];
+            this.accountTransactionMap[keysArr[i]] = [...currentTxs, ...transactions];
         }
 
         this.lastHashBlock = currentBlock.number;
@@ -193,6 +206,7 @@ export class WalletService {
         if (this.onSync) {
             await this.onSync(walletState);
         }
+        this.synchronizing = false;
 
         return walletState;
     }
@@ -320,6 +334,7 @@ export class WalletService {
         // Remove equal transactions
         for (let i = 0; i < sortedTxs.length; i += 1) {
             let j = i + 1;
+
             while (j < sortedTxs.length) {
                 if (sortedTxs[i].transactionHash === sortedTxs[j].transactionHash && sortedTxs[i].type === sortedTxs[j].type) {
                     sortedTxs.splice(j, 1);
@@ -330,6 +345,10 @@ export class WalletService {
         }
 
         return sortedTxs;
+    }
+
+    async getTransactionFromHash(txHash: string): Promise<Transaction> {
+        return this.transactionService.getTransactionFromHash(txHash, [...this.getAllAddresses(), this.getNextAddress()]);
     }
 
     // ---------------------------
@@ -486,7 +505,6 @@ export class WalletService {
     }
 
     async getDAOUnlockableAmounts(): Promise<DAOUnlockableAmount[]> {
-        await this.synchronize();
         return this.daoService.getUnlockableAmountsFromCells(this.getCells());
     }
 }
