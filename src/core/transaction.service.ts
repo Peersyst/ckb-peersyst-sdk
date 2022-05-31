@@ -407,7 +407,6 @@ export class TransactionService {
             signatures.push(hd.key.signRecoverable(entry.message, privateKeys[i]));
         }
         const tx = sealTransaction(txSkeletonWEntries, signatures);
-        console.log(JSON.stringify(tx, null, 2));
         const hash = await this.connection.getRPC().send_transaction(tx, "passthrough");
 
         return hash;

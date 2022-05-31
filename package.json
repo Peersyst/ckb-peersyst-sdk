@@ -50,7 +50,7 @@
     "license": "ISC",
     "dependencies": {
         "@ckb-lumos/lumos": "^0.18.0-rc6",
-        "@rather-labs/nrc-721-sdk": "0.0.15",
+        "@rather-labs/nrc-721-sdk": "0.0.16",
         "cross-fetch": "^3.1.5",
         "rimraf": "^3.0.2"
     },
