@@ -10,6 +10,8 @@ import { QueryOptions } from "@ckb-lumos/base";
 import { Nft, NftService } from "./assets/nft.service";
 import { Logger } from "../utils/logger";
 
+export { AddressType };
+
 export enum AddressScriptType {
     SECP256K1_BLAKE160 = "SECP256K1_BLAKE160",
     SUDT = "SUDT",
@@ -63,6 +65,11 @@ export class WalletService {
     private onSyncStart!: () => void;
     private synchronizing = false;
 
+    // The connectionService and a mnemonic are mandatory
+    // walletState is useful if you will close the instance and want to sync from a given state
+    // onSync method is called when sync finished. Useful to persist current state
+    // onSyncStart is called when a synchronization start
+    // It throws an error when mnemonic is invalid
     constructor(
         connectionService: ConnectionService,
         mnemo: string,
@@ -103,10 +110,12 @@ export class WalletService {
         this.accountPublicKey = WalletService.getPrivateKeyFromMnemonic(mnemo).toAccountExtendedPublicKey();
     }
 
-    static createNewMnemonic() {
+    // Creates a new mnemonic
+    static createNewMnemonic(): string {
         return mnemonic.generateMnemonic();
     }
 
+    // Validates a mnemonic
     static validateMnemonic(mnemo: string): boolean {
         return mnemonic.validateMnemonic(mnemo);
     }
@@ -119,6 +128,8 @@ export class WalletService {
     // ----------------------
     // -- Wallet functions --
     // ----------------------
+
+    // Gets current wallet state
     getWalletState(): WalletState {
         return {
             addressMap: { ...this.addressMap },
@@ -130,6 +141,8 @@ export class WalletService {
         };
     }
 
+    // Synchronizes and returns new wallet state
+    // Calls onSyncStart at start and and onSync when finishes
     async synchronize(): Promise<WalletState> {
         if (this.synchronizing) return this.getWalletState();
         this.synchronizing = true;
@@ -215,6 +228,7 @@ export class WalletService {
         return [...Object.values(this.accountCellsMap)].flat(1);
     }
 
+    // Returns next receive address without any transactions
     getNextAddress(): string {
         return this.getAddress(this.firstRIndexWithoutTxs, AddressType.Receiving);
     }
@@ -226,6 +240,7 @@ export class WalletService {
         return [...Array(this.firstCIndexWithoutTxs).keys()];
     }
 
+    // Gets lock from a specific accountId, addressType and script type
     getLock(accountId = 0, addressType: AddressType, script: AddressScriptType = AddressScriptType.SECP256K1_BLAKE160): Script {
         const template = this.connection.getConfig().SCRIPTS[script];
         const lockScript = {
@@ -237,6 +252,7 @@ export class WalletService {
         return lockScript;
     }
 
+    // Gets address from a specific accountId, addressType and script type
     getAddress(accountId = 0, addressType: AddressType, script: AddressScriptType = AddressScriptType.SECP256K1_BLAKE160): string {
         const key = `${accountId}-${addressType}-${script}`;
         if (!this.addressMap[key]) {
@@ -247,6 +263,7 @@ export class WalletService {
         return this.addressMap[key];
     }
 
+    // Gets all addresses with at least one transactions¡
     getAllAddresses(): string[] {
         const addresses = [];
         for (let i = 0; i < this.firstRIndexWithoutTxs; i += 1) {
@@ -299,6 +316,7 @@ export class WalletService {
         return { address, privateKey };
     }
 
+    // Gets balance from a single account
     async getBalanceFromAccount(accountId = 0, addressType: AddressType = AddressType.Receiving): Promise<Balance> {
         const address = this.getAddress(accountId, addressType);
         const ckb = await this.ckbService.getBalance(address);
@@ -309,6 +327,7 @@ export class WalletService {
         return { ckb, tokens, dao, nfts };
     }
 
+    // Gets wallet total balance
     async getBalance(): Promise<Balance> {
         const cells = this.getCells();
         const ckb = this.ckbService.getBalanceFromCells(cells);
@@ -322,12 +341,15 @@ export class WalletService {
     // -----------------------------------
     // -- Transaction service functions --
     // -----------------------------------
+
+    // Gets all transactions from a single account
     async getTransactionsFromAccount(accountId = 0, addressType: AddressType = AddressType.Receiving): Promise<Transaction[]> {
         const address = this.getAddress(accountId, addressType);
 
         return this.transactionService.getTransactions(address, this.getAllAddresses());
     }
 
+    // Gets all transactions of the wallet
     getTransactions(): Transaction[] {
         const sortedTxs = [...Object.values(this.accountTransactionMap)].flat(1).sort((txa, txb) => txa.blockNumber - txb.blockNumber);
 
@@ -347,6 +369,8 @@ export class WalletService {
         return sortedTxs;
     }
 
+    // Get a transaction from hash
+    // Useful from uncommitted transactions
     async getTransactionFromHash(txHash: string): Promise<Transaction> {
         return this.transactionService.getTransactionFromHash(txHash, [...this.getAllAddresses(), this.getNextAddress()]);
     }
@@ -354,6 +378,9 @@ export class WalletService {
     // ---------------------------
     // -- CKB service functions --
     // ---------------------------
+
+    // Sends a transaction from a single account
+    // Returns the transaction hash
     async sendTransactionSingleAccount(
         amount: bigint,
         mnemo: string,
@@ -367,6 +394,8 @@ export class WalletService {
         return this.ckbService.transfer(address, to, amount, privateKey, feeRate);
     }
 
+    // Sends a transaction from all the accounts in the wallet
+    // Returns the transaction hash
     async sendTransaction(amount: bigint, mnemo: string, to: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         await this.synchronize();
         const addresses = this.getAllAddresses();
@@ -375,11 +404,14 @@ export class WalletService {
         return this.ckbService.transferFromCells(this.getCells(), addresses, to, amount, privateKeys, feeRate);
     }
 
+    // Gets the ckb balance of a single account
     async getCKBBalanceFromAccount(accountId = 0, addressType: AddressType = AddressType.Receiving): Promise<CKBBalance> {
         const address = this.getAddress(accountId, addressType);
         return this.ckbService.getBalance(address);
     }
 
+    // Get the ckb balance of the wallet
+    // Should be synchronized first
     getCKBBalance(): CKBBalance {
         return this.ckbService.getBalanceFromCells(this.getCells());
     }
@@ -387,7 +419,10 @@ export class WalletService {
     // -----------------------------
     // -- Token service functions --
     // -----------------------------
+
     // Deprecated in accounts
+    // Issue a new token from a specific account
+    // Returns transaction hash
     async issueTokens(amount: number, mnemo: string, accountId = 0, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
 
@@ -395,6 +430,9 @@ export class WalletService {
     }
 
     // Deprecated in accounts
+    // Transfer a token with where its type has args token (4th param)
+    // Amount is the number of token to transfer. Minumum cell size required.
+    // Returns transaction hash
     async transferTokens(
         amount: number,
         mnemo: string,
@@ -408,11 +446,14 @@ export class WalletService {
         return this.tokenService.transfer(address, to, token, amount, privateKey, feeRate);
     }
 
+    // Gets the token balance from a single account
     async getTokensBalanceFromAccount(accountId = 0, addressType: AddressType = AddressType.Receiving): Promise<TokenAmount[]> {
         const address = this.getAddress(accountId, addressType);
         return this.tokenService.getBalance(address);
     }
 
+    // Get the token balance of the whole wallet
+    // Should be synchronized first
     getTokensBalance(): TokenAmount[] {
         return this.tokenService.getBalanceFromCells(this.getCells());
     }
@@ -421,11 +462,14 @@ export class WalletService {
     // -- Nft service functions --
     // -----------------------------
 
+    // Gets all nfts from a single account
     async getNftsBalanceFromAccount(accountId = 0, addressType: AddressType = AddressType.Receiving): Promise<Nft[]> {
         const address = this.getAddress(accountId, addressType);
         return this.nftService.getBalance(address);
     }
 
+    // Gets the nfts from the whole wallet
+    // Should be synchronized first
     async getNftsBalance(): Promise<Nft[]> {
         return this.nftService.getBalanceFromCells(this.getCells());
     }
@@ -433,11 +477,16 @@ export class WalletService {
     // ---------------------------
     // -- DAO service functions --
     // ---------------------------
+
+    // Deposits in the DAO from a single account
+    // Returns the hash of the transaction
     async depositInDAOSingleAccount(amount: bigint, mnemo: string, accountId = 0, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivateKey(mnemo, accountId);
         return this.daoService.deposit(amount, address, address, privateKey, feeRate);
     }
 
+    // Deposits in DAO from all the accounts with enough balance
+    // Returns the hash of the transaction
     async depositInDAO(amount: bigint, mnemo: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         await this.synchronize();
         const addresses = this.getAllAddresses();
@@ -446,7 +495,7 @@ export class WalletService {
         return this.daoService.depositMultiAccount(amount, this.getCells(), addresses, this.getNextAddress(), privateKeys, feeRate);
     }
 
-    async withdrawOrUnlockFromCell(cell: Cell, mnemo: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
+    private async withdrawOrUnlockFromCell(cell: Cell, mnemo: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
         const { address, privateKey } = this.getAddressAndPrivKeyFromLock(mnemo, cell.cell_output.lock);
         const feeAddresses = this.getAllAddresses();
         const privateKeys = this.getAllPrivateKeys(mnemo);
@@ -466,36 +515,7 @@ export class WalletService {
         return this.daoService.withdraw(cell, privateKey, feeAddresses, privateKeys, feeRate);
     }
 
-    async withdrawOrUnlock(unlockableAmount: DAOUnlockableAmount, mnemo: string): Promise<string> {
-        await this.synchronize();
-        const cells = await this.daoService.filterDAOCells(this.getCells());
-
-        const cell = await this.daoService.findCellFromUnlockableAmountAndCells(unlockableAmount, cells);
-        if (!cell) {
-            throw new Error("Cell related to unlockable amount not found!");
-        }
-        this.logger.info(cell);
-        return this.withdrawOrUnlockFromCell(cell, mnemo);
-    }
-
-    async getDAOStatisticsFromAccount(accountId = 0, addressType: AddressType = AddressType.Receiving): Promise<DAOStatistics> {
-        const address = this.getAddress(accountId, addressType);
-        return this.daoService.getStatistics(address);
-    }
-
-    async getDAOStatistics(): Promise<DAOStatistics> {
-        return this.daoService.getStatisticsFromCells(this.getCells());
-    }
-
-    async getDAOBalanceFromAccount(accountId = 0, addressType: AddressType = AddressType.Receiving): Promise<DAOBalance> {
-        const address = this.getAddress(accountId, addressType);
-        return this.daoService.getBalance(address);
-    }
-
-    async getDAOBalance(): Promise<DAOBalance> {
-        return this.daoService.getBalanceFromCells(this.getCells());
-    }
-
+    // Gets DAO unlockable amounts from a single account
     async getDAOUnlockableAmountsFromAccount(
         accountId = 0,
         addressType: AddressType = AddressType.Receiving,
@@ -504,7 +524,47 @@ export class WalletService {
         return this.daoService.getUnlockableAmounts(address);
     }
 
+    // Gets DAO unlockable amounts from the whole wallet
+    // Should be synchronized first
     async getDAOUnlockableAmounts(): Promise<DAOUnlockableAmount[]> {
         return this.daoService.getUnlockableAmountsFromCells(this.getCells());
+    }
+
+    // Withdraws or unlocks an unlockable amount
+    // Returns the hash of the transaction
+    async withdrawOrUnlock(unlockableAmount: DAOUnlockableAmount, mnemo: string, feeRate: FeeRate = FeeRate.NORMAL): Promise<string> {
+        await this.synchronize();
+        const cells = await this.daoService.filterDAOCells(this.getCells());
+
+        const cell = await this.daoService.findCellFromUnlockableAmountAndCells(unlockableAmount, cells);
+        if (!cell) {
+            throw new Error("Cell related to unlockable amount not found!");
+        }
+        this.logger.info(cell);
+        return this.withdrawOrUnlockFromCell(cell, mnemo, feeRate);
+    }
+
+    // Gets DAO statistic from a single account
+    async getDAOStatisticsFromAccount(accountId = 0, addressType: AddressType = AddressType.Receiving): Promise<DAOStatistics> {
+        const address = this.getAddress(accountId, addressType);
+        return this.daoService.getStatistics(address);
+    }
+
+    // Gets DAO statistic from the whole wallet
+    // Should be synchronized first
+    async getDAOStatistics(): Promise<DAOStatistics> {
+        return this.daoService.getStatisticsFromCells(this.getCells());
+    }
+
+    // Get DAO balance from a single account
+    async getDAOBalanceFromAccount(accountId = 0, addressType: AddressType = AddressType.Receiving): Promise<DAOBalance> {
+        const address = this.getAddress(accountId, addressType);
+        return this.daoService.getBalance(address);
+    }
+
+    // Get DAO balance from the whole wallet
+    // Should be synchronized first
+    async getDAOBalance(): Promise<DAOBalance> {
+        return this.daoService.getBalanceFromCells(this.getCells());
     }
 }

@@ -60,6 +60,9 @@ export class ConnectionService {
     private blockHeaderHashMap = new Map<string, Header>();
     private transactionMap = new Map<string, TransactionWithStatus>();
 
+    // ckbUrl is the url of the node rpc
+    // indexerUrl is the url of the node indexer
+    // env is the environment of the node
     constructor(ckbUrl: string, indexerUrl: string, env: Environments) {
         this.ckbUrl = ckbUrl;
         this.indexerUrl = indexerUrl;
@@ -70,6 +73,7 @@ export class ConnectionService {
         config.initializeConfig(this.config);
     }
 
+    // Returns info of the blockchain connected by the rpc
     async getBlockchainInfo(): Promise<ChainInfo> {
         return this.rpc.get_blockchain_info();
     }
@@ -79,12 +83,14 @@ export class ConnectionService {
         this.blockHeaderNumberMap.set(header.number, header);
     }
 
+    // Gets latest block header in the blockchain
     async getCurrentBlockHeader(): Promise<Header> {
         const lastBlockHeader = await this.rpc.get_tip_header();
         this.setBlockHeaderMaps(lastBlockHeader);
         return lastBlockHeader;
     }
 
+    // Gets a block header from its hash
     async getBlockHeaderFromHash(blockHash: string): Promise<Header> {
         if (!this.blockHeaderHashMap.has(blockHash)) {
             const header = await this.rpc.get_header(blockHash);
@@ -93,6 +99,7 @@ export class ConnectionService {
         return this.blockHeaderHashMap.get(blockHash);
     }
 
+    // Get a block header from its hex number
     async getBlockHeaderFromNumber(blockNumber: string): Promise<Header> {
         if (!this.blockHeaderNumberMap.has(blockNumber)) {
             const header = await this.rpc.get_header_by_number(blockNumber);
@@ -101,10 +108,14 @@ export class ConnectionService {
         return this.blockHeaderNumberMap.get(blockNumber);
     }
 
+    // Gets a cell by its out point
     async getCell(outPoint: OutPoint): Promise<CellWithStatus> {
         return this.rpc.get_live_cell(outPoint, true);
     }
 
+    // Gets a transaction with status from a hash
+    // Useful for when the transaction is still not committed
+    // For transactions that fave not finished you should set useMap = false to not receive the same!
     async getTransactionFromHash(transactionHash: string, useMap = true): Promise<TransactionWithStatus> {
         if (!useMap || !this.transactionMap.has(transactionHash)) {
             const transaction = await this.rpc.get_transaction(transactionHash);
@@ -125,6 +136,7 @@ export class ConnectionService {
         return this.rpc;
     }
 
+    // Get current environment
     getEnvironment(): Environments {
         return this.env;
     }
@@ -141,19 +153,23 @@ export class ConnectionService {
         return this.getCellProvider({ ...queryOptions, type: "empty" });
     }
 
+    // Get current ckb url
     getCKBUrl(): string {
         return this.ckbUrl;
     }
 
+    // Get current indexer url
     getIndexerUrl(): string {
         return this.indexerUrl;
     }
 
+    // Generates an address from a lock script
     getAddressFromLock(lock: Script): string {
         // return helpers.generateAddress(lock, { config: this.config });
         return helpers.encodeToAddress(lock, { config: this.config });
     }
 
+    // Gets the locks script from an address
     getLockFromAddress(address: string): Script {
         return helpers.parseAddress(address, { config: this.config });
     }
@@ -180,6 +196,9 @@ export class ConnectionService {
         return lock.code_hash === OnepassConfig[this.env].CODE_HASH && lock.hash_type === OnepassConfig[this.env].HASH_TYPE;
     }
 
+    // Providing an environment and addres returns a boolean indicating:
+    // true address is Blake160, Blake160Multisig, ACP, Onepass
+    // false address is of another kind or invalid
     static isAddress(network: Environments, address: string): boolean {
         const config = network === Environments.Mainnet ? LINA : AGGRON4;
         try {

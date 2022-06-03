@@ -1,27 +1,24 @@
 import { ConnectionService, Environments, WalletService, Logger } from "../src";
 
-const ckbUrl = "http://78.46.174.87:8114/rpc";
-const indexerUrl = "http://78.46.174.87:8114/indexer";
+const ckbUrl = "http://localhost:8117/rpc";
+const indexerUrl = "http://localhost:8117/indexer";
 
 const main = async () => {
     try {
-        const connectionService = new ConnectionService(ckbUrl, indexerUrl, Environments.Testnet);
-
         const mnemonic = WalletService.createNewMnemonic();
-        Logger.info(mnemonic); // Your new private key generator, save it
+        Logger.info(mnemonic); // Your new generated mnemonic, save it
 
-        // Wallet instance is necessary for all wallet functions
+        const connectionService = new ConnectionService(ckbUrl, indexerUrl, Environments.Testnet);
         const wallet = new WalletService(connectionService, mnemonic);
 
         // You can have more than 1 public address per mnemonic
-        const addressAcc0 = wallet.getAddress(); // Default address is 0
-        Logger.info(addressAcc0);
-        const addressAcc1 = wallet.getAddress(1);
-        Logger.info(addressAcc1);
+        const nextAddress = wallet.getNextAddress();
+        Logger.info(nextAddress);
 
         // To get your private key you need to put you mnemonic as sdk does not keep it
-        const { privateKey } = wallet.getAddressAndPrivateKey(mnemonic);
+        const { privateKey, address } = wallet.getAddressAndPrivateKey(mnemonic);
         Logger.info(privateKey);
+        Logger.info(address);
     } catch (error) {
         Logger.error(`${error.name}: ${error.message}`);
     }

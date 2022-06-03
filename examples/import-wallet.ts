@@ -1,15 +1,14 @@
 import { ConnectionService, Environments, WalletService, Logger, WalletState } from "../src";
 
-const ckbUrl = "http://78.46.174.87:8114/rpc";
-const indexerUrl = "http://78.46.174.87:8114/indexer";
+const ckbUrl = "http://localhost:8117/rpc";
+const indexerUrl = "http://localhost:8117/indexer";
 const mnemonic = "private pond zero popular fashion omit february obscure pattern city camp pistol";
-// const mnemonic2 = "teach act exotic into script once dutch choice menu elite apple faith";
 
 const main = async () => {
     try {
         const connectionService = new ConnectionService(ckbUrl, indexerUrl, Environments.Testnet);
 
-        // Wallet instance is necessary for all wallet functions
+        // The third parameter given in the constructor is a callback called when a synchronize finishes
         const wallet = new WalletService(connectionService, mnemonic, null, async (walletState: WalletState) => {
             Logger.info("Got wallet State:");
             Logger.info(walletState);
@@ -22,8 +21,6 @@ const main = async () => {
         Logger.info(addresses);
         const newAddress = wallet.getNextAddress();
         Logger.info(newAddress);
-        Logger.info(connectionService.isAddress(newAddress));
-        Logger.info(connectionService.isAddress(""));
     } catch (error) {
         Logger.error(`${error.name}: ${error.message}`);
     }
