@@ -14,10 +14,8 @@ const main = async () => {
         const wallet = new WalletService(connectionService, mnemonic);
 
         // You can have more than 1 public address per mnemonic
-        const addressAcc0 = wallet.getAddress(); // Default address is 0
-        Logger.info(addressAcc0);
-        const addressAcc1 = wallet.getAddress(1);
-        Logger.info(addressAcc1);
+        const addresses = wallet.getNextAddress(); // Default address is 0
+        Logger.info(addresses);
 
         // To get your private key you need to put you mnemonic as sdk does not keep it
         const { privateKey } = wallet.getAddressAndPrivateKey(mnemonic);

@@ -62,9 +62,12 @@ export class CKBService {
         // Inject capacity
         txSkeleton = this.transactionService.addSecp256CellDep(txSkeleton);
         txSkeleton = this.transactionService.injectCapacity(txSkeleton, amount, cells);
+        console.log("txSkeleton:", JSON.stringify(txSkeleton, null, 2));
 
         // Pay fee
         txSkeleton = await common.payFeeByFeeRate(txSkeleton, fromAddresses, feeRate, null, this.connection.getConfigAsObject());
+        console.log("txSkeleton after fee:", JSON.stringify(txSkeleton, null, 2));
+        return "hola";
 
         // Get signing private keys
         const signingPrivKeys = this.transactionService.extractPrivateKeys(txSkeleton, fromAddresses, privateKeys);
