@@ -330,6 +330,10 @@ export class WalletService {
         return this.transactionService.getTransactions(address, this.getAllAddresses());
     }
 
+    async getTransactionsFromAddress(address: string): Promise<Transaction[]> {
+        return this.transactionService.getTransactions(address, [address]);
+    }
+
     getTransactions(): Transaction[] {
         const sortedTxs = [...Object.values(this.accountTransactionMap)].flat(1).sort((txa, txb) => txa.blockNumber - txb.blockNumber);
 

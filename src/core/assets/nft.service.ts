@@ -166,6 +166,11 @@ export class NftService {
             isNftCell = false;
         }
 
+        if (!isNftCell) {
+            const mNftCfg = this.getMNftConfig();
+            isNftCell = scriptType.codeHash === mNftCfg.codeHash;
+        }
+
         return isNftCell;
     }
 
