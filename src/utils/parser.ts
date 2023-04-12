@@ -1,4 +1,3 @@
-import * as fs from "fs";
 import { fromJS } from "immutable";
 import { Cell, CellDep, Hash, HexString, PackedSince } from "@ckb-lumos/base";
 import { List, Map, Record } from "immutable";
