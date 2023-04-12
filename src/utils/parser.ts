@@ -28,6 +28,6 @@ const TransactionSkeletonTypeReviver = (key: string, value: any) => {
     else if (key === "inputSinces") return Map<number, PackedSince>(value);
 };
 
-export const jsonToTransactionSkeletonInterface = (json: any) => {
+export const jsonToTransactionSkeletonInterface = (json: object) => {
     return fromJS(json, TransactionSkeletonTypeReviver);
 };
