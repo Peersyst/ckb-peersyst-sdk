@@ -28,9 +28,6 @@ const TransactionSkeletonTypeReviver = (key: string, value: any) => {
     else if (key === "inputSinces") return Map<number, PackedSince>(value);
 };
 
-export const jsonToTransactionSkeletonInterface = (path: string) => {
-    const jsonString = fs.readFileSync(path);
-    const parsedJSON = JSON.parse(jsonString.toString());
-
-    return fromJS(parsedJSON, TransactionSkeletonTypeReviver);
+export const jsonToTransactionSkeletonInterface = (json: any) => {
+    return fromJS(json, TransactionSkeletonTypeReviver);
 };
